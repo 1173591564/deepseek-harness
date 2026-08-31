@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dsh headless · Dashboard Answerer</title>
+<style>
+  :root{--bg:#0a0c13;--panel:#12151f;--panel-2:#181c29;--border:#242a3d;--text:#e8ebf4;--muted:#97a0b8;--muted-2:#6b7490;--accent:#7c9eff;--accent-2:#b794f6;--agent:#f6ad55;--ok:#68d391;--warn:#fc8181;--grad:linear-gradient(135deg,#7c9eff,#b794f6)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(900px 420px at 85% -10%,rgba(124,158,255,.12),transparent 60%),radial-gradient(700px 380px at -10% 25%,rgba(79,209,197,.09),transparent 60%)}
+  .wrap{max-width:880px;margin:0 auto;padding:48px 28px 80px}
+  header{margin:0 0 28px}
+  .eyebrow{color:var(--accent-2);font-size:12px;letter-spacing:3px;text-transform:uppercase;font-weight:700;margin-bottom:10px}
+  h1{margin:0 0 8px;font-size:30px;font-weight:800;letter-spacing:-.5px;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .sub{color:var(--muted);font-size:14px}
+  .status{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--border);padding:5px 12px;border-radius:999px;margin-top:14px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted-2);transition:background .2s}
+  .dot.live{background:var(--ok);box-shadow:0 0 8px rgba(104,211,145,.6)}
+  .dot.wait{background:var(--warn);animation:pulse 1.4s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px 24px;margin:18px 0;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:rise .25s ease}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}}
+  .card .qid{font-size:11px;color:var(--muted-2);font-family:"SF Mono",Menlo,Consolas,monospace;letter-spacing:.5px}
+  .card .q-agent{color:var(--agent);font-size:12px;margin-left:10px}
+  .card .q-text{font-size:17px;font-weight:600;margin:10px 0 6px;color:var(--text)}
+  .card .q-detail{color:var(--muted);font-size:13px;margin:4px 0 12px}
+  .card .q-header{color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+  .opts{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .opt{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s,transform .1s;text-align:left;font:inherit;color:var(--text);width:100%}
+  .opt:hover{border-color:var(--accent);background:rgba(124,158,255,.08);transform:translateY(-1px)}
+  .opt:active{transform:translateY(0)}
+  .opt .lbl{font-weight:600;flex-shrink:0}
+  .opt .desc{color:var(--muted);font-size:13px}
+  .opt .pick{margin-left:auto;color:var(--accent);font-size:12px;opacity:0;transition:opacity .15s}
+  .opt.sel{border-color:var(--accent);background:rgba(124,158,255,.12)}
+  .opt.sel .pick{opacity:1}
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .btn{padding:10px 20px;border-radius:10px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font:inherit;cursor:pointer;transition:all .15s}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--grad);color:#0b0d15;font-weight:700;border:none}
+  .btn.primary:disabled{opacity:.4;cursor:not-allowed}
+  .btn.ghost{color:var(--muted)}
+  .btn.danger{color:var(--warn);border-color:rgba(252,129,129,.4)}
+  .empty{text-align:center;color:var(--muted-2);padding:60px 20px;font-size:14px}
+  .empty .ic{font-size:28px;display:block;margin-bottom:10px;opacity:.5}
+  .log{margin-top:32px;font-size:12px;color:var(--muted-2);font-family:"SF Mono",Menlo,Consolas,monospace}
+  .log .li{padding:3px 0;opacity:.7}
+  .log .li.ok{color:var(--ok)} .log .li.warn{color:var(--warn)}
+  footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted-2);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">dsh headless · external answerer</div>
+    <h1>Dashboard Answerer</h1>
+    <div class="sub">headless dsh 把交互式问答外包到这里 —— 收到题点选项，回灌答案继续 agent loop</div>
+    <div class="status"><span class="dot" id="conn"></span><span id="connTxt">connecting…</span></div>
+  </header>
+  <div id="cards"></div>
+  <div class="empty" id="empty"><span class="ic">⏳</span>等待 agent 发起提问…</div>
+  <div class="log" id="log"></div>
+  <footer>dashboard-provider · examples/headless-dashboard</footer>
+</div>
+<script>
+const cards = document.getElementById('cards');
+const empty = document.getElementById('empty');
+const logEl = document.getElementById('log');
+const conn = document.getElementById('conn');
+const connTxt = document.getElementById('connTxt');
+const selections = new Map(); // qid -> Set<label>
+function logg(msg, cls=''){
+  const d=document.createElement('div'); d.className='li '+cls; d.textContent=new Date().toLocaleTimeString()+'  '+msg; logEl.prepend(d);
+  while(logEl.children.length>20) logEl.lastChild.remove();
+}
+function toggleSel(card, qid, label, multi){
+  const sel = selections.get(qid) ?? new Set();
+  if(!multi){ sel.clear(); }
+  if(sel.has(label)) sel.delete(label); else sel.add(label);
+  selections.set(qid, sel);
+  card.querySelectorAll('.opt').forEach(o=>{
+    const l=o.dataset.label; o.classList.toggle('sel', sel.has(l));
+  });
+}
+function renderQuestion(ev){
+  empty.style.display='none';
+  const {id, questions, agent} = ev;
+  const card=document.createElement('div'); card.className='card'; card.dataset.id=id;
+  questions.forEach((q,qi)=>{
+    if(q.header){const h=document.createElement('div');h.className='q-header';h.textContent=q.header;card.appendChild(h);}
+    const qid=document.createElement('div');qid.className='qid';qid.textContent='question '+(qi+1)+' · id='+q.id+(agent?' · agent='+agent:'');card.appendChild(qid);
+    const t=document.createElement('div');t.className='q-text';t.textContent=q.question;card.appendChild(t);
+    if(q.detail){const d=document.createElement('div');d.className='q-detail';d.textContent=q.detail;card.appendChild(d);}
+    if(q.options&&q.options.length){
+      const opts=document.createElement('div');opts.className='opts';
+      q.options.forEach((o,i)=>{
+        const b=document.createElement('button');b.className='opt';b.dataset.label=o.label;
+        b.innerHTML='<span class="lbl">'+o.label+(i===0?' (Recommended)':'')+'</span>'+(o.description?'<span class="desc">'+o.description+'</span>':'')+'<span class="pick">✓</span>';
+        b.onclick=()=>toggleSel(card, q.id, o.label, q.multiSelect);
+        opts.appendChild(b);
+      });
+      card.appendChild(opts);
+    } else {
+      const inp=document.createElement('input');inp.type='text';inp.placeholder='输入答案…';inp.style.cssText='width:100%;padding:11px 14px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;color:var(--text);font:inherit;margin-top:10px';
+      inp.dataset.qid=q.id;inp.oninput=()=>{const s=selections.get(q.id)??new Set();s.clear();s.add(inp.value);selections.set(q.id,s);};
+      card.appendChild(inp);
+    }
+  });
+  const actions=document.createElement('div');actions.className='actions';
+  const submit=document.createElement('button');submit.className='btn primary';submit.textContent='提交答案';submit.disabled=true;
+  const cancel=document.createElement('button');cancel.className='btn ghost';cancel.textContent='取消';
+  submit.onclick=()=>submitAnswer(id, questions);
+  cancel.onclick=()=>cancelQ(id);
+  card.appendChild(actions);
+  actions.appendChild(submit);actions.appendChild(cancel);
+  const sync=()=>{let any=false;questions.forEach(q=>{if(selections.get(q.id)?.size)any=true;});submit.disabled=!any;};
+  card.addEventListener('click',sync);card.addEventListener('input',sync);
+  cards.prepend(card);
+  logg('question received: id='+id+' ('+questions.length+' question(s))');
+}
+async function submitAnswer(id, questions){
+  const answers=questions.map(q=>{
+    const sel=selections.get(q.id)??new Set();
+    const selected=[...sel];
+    const card=document.querySelector('.card[data-id="'+id+'"]');
+    const inp=card?.querySelector('input[data-qid="'+q.id+'"]');
+    return {id:q.id, selected, custom: inp && inp.value ? inp.value : undefined};
+  });
+  logg('submitting answer for '+id);
+  const r=await fetch('/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,answers})});
+  const j=await r.json();
+  if(j.ok){logg('answer accepted','ok');}else{logg('answer rejected: '+(j.error||'?'),'warn');}
+}
+async function cancelQ(id){
+  await fetch('/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  logg('cancelled '+id,'warn');
+}
+function resolveCard(ev){
+  const c=document.querySelector('.card[data-id="'+ev.id+'"]');
+  if(c){c.style.opacity='.4';c.style.pointerEvents='none';const note=document.createElement('div');note.className='q-detail';note.style.color='var(--ok)';note.textContent='✓ 已处理';c.appendChild(note);setTimeout(()=>c.remove(),1500);}
+  if(!cards.children.length) empty.style.display='block';
+  logg('resolved: '+ev.id+' ('+(ev.timeout?'timeout':ev.cancelled?'cancelled':ev.aborted?'aborted':'answered')+')');
+}
+function connect(){
+  const es=new EventSource('/events');
+  es.addEventListener('open',()=>{conn.className='dot live';connTxt.textContent='connected';logg('SSE connected','ok');});
+  es.addEventListener('error',()=>{conn.className='dot';connTxt.textContent='reconnecting…';es.close();setTimeout(connect,1500);});
+  es.addEventListener('question',e=>renderQuestion(JSON.parse(e.data)));
+  es.addEventListener('resolved',e=>resolveCard(JSON.parse(e.data)));
+}
+connect();
+logg('dashboard ready');
+</script>
+</body>
+</html>
