@@ -110,8 +110,15 @@ dsh --profile headless "解释一下 mixture-of-experts 模型中的负载均衡
 
 ## 已知边界与后续
 
-- **P2 反射层/主动层**：`tools/post-execute` 写 .tex/bib 时自动引用校验；`agent/turn-stopping`
-  回合末方向捕获（接入 scholar interests/research-sync）
+- **P2 已实现（v0.1.4）**：
+  - 反射层 `tools/post-execute`——write/str_replace_editor 写 `.tex/.bib` 后自动提取
+    `\cite/\citep/\citet/\bibitem` 键，与库内元数据词法对账，注入 `<citation_audit>`（order 160）；
+  - 主动层 `session/event`——捕获 user/message 话题词累积会话方向线程，
+    注入 `<scholar_session_interests>`（order 120）；首次捕获打 `session interests started` 日志；
+  - rules 分发——`scholar init-dsh` 将包内 `templates/dsh/rules/` 落到知识库
+    （copy-if-missing，不覆盖用户自定义）
+- **P2 e2e 待补**：J9（citation audit 实跑）与 5 个级联判据因 DeepSeek 余额耗尽未跑完，
+  充值后重跑 `node run-e2e.mjs` 即可（R1 两轮核心判据在断供前已全过）
 - **P3 习惯层/记忆层**：dsh jobs 定时 kb-update/auto-notes；腾讯 Agent Memory session-init
   串入 pre-step（memory-native 已验证），研究方向加权检索
 - **词法检索边界**：英文术语为主信号；中文话题依赖 CJK 二元组 + 查询中的英文术语，
