@@ -95,6 +95,20 @@ console.log('  | ' + (r4out.split('\n').filter(l => l.trim() && !l.includes('[')
 console.log('\n[J3] 15 个学术技能可被发现');
 judge(/research-survey|paper-deep-dive|paper-ingestion|reproduce-paper/.test(r4out), '回复含 scholar 特色技能名');
 
+// ── R5：P2 反射层（写 .tex → 引用对账）+ 主动层（方向捕获）────────────────
+console.log('\n[R5] task: P2 反射层/主动层探针');
+const r5dir = mkdtempSync(join(tmpdir(), 'scholar-e2e-tex-'));
+const { out: r5out, code: r5code } = await runDsh(
+  '创建一个最小示例论文 draft.tex，其中用 \\cite{vaswani2017attention} 引用 Transformer 论文，内容两三句即可',
+  r5dir);
+console.log(`  exit=${r5code}`);
+console.log('  | ' + r5out.split('\n').filter(l => /citation audit|session interests/.test(l)).map(l => l.trim().slice(0, 120)).join('\n  | '));
+console.log('\n[J9] 反射层：写 .tex 自动触发引用对账');
+judge(/citation audit refreshed/.test(r5out), 'citation audit 日志出现');
+console.log('\n[J10] 主动层：会话方向捕获启动');
+judge(/session interests started/.test(r5out), 'session interests 日志出现');
+rmSync(r5dir, { recursive: true, force: true });
+
 // ── 挂载证据（任一运行的输出即可）────────────────────────────────────────
 console.log('\n[J1] 三插件挂载 + 无 DB 优雅降级');
 judge(r3out.includes('[scholar-native] plugin mounted'), 'scholar-native 挂载日志');

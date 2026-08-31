@@ -11,7 +11,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN = path.join(HERE, 'scholar-native.mjs');
 
@@ -169,6 +168,40 @@ try {
   ok(Array.isArray(ab), '已缓存索引不受 abort 影响（fast path）');
 } catch (e) { threw = true; }
 ok(threw || true, 'abort 路径无未捕获异常');
+
+// ── 9. P2 反射层：引用键提取与对账 ────────────────────────────────────────
+console.log('\n[9] citation audit (P2 reflex)');
+const tex = String.raw`\section{Intro}
+as shown in \cite{vaswani2017attention, deepseekv3} and \citep[e.g.][]{switch2022}...
+\bibitem{shazeer2017outrageously} Sparsely-Gated MoE.`;
+const keys = S.extractCiteKeys(tex);
+ok(keys.length === 4 && keys.includes('vaswani2017attention') && keys.includes('shazeer2017outrageously'),
+  '提取 4 个键（cite/citep/bibitem、多键逗号）: ' + keys.length);
+ok(S.extractCiteKeys('no citations here').length === 0, '无引用 → 空');
+const audit = S.buildCitationAudit(keys, index);
+ok(audit.startsWith('<citation_audit>') && audit.endsWith('</citation_audit>'), '对账块标签完整');
+ok(audit.includes('vaswani2017attention') && audit.includes('nearest'), '含键名与最近邻行');
+ok(S.buildCitationAudit([], index) === '', '空键列表 → 空串');
+// 反射层挂钩：写 .tex 触发、其它工具不触发
+const texPath = path.join(FIX, 'paper.tex');
+fs.writeFileSync(texPath, tex);
+const hit1 = S.auditWrittenFile('agent-B', 'write', { path: texPath }, undefined);
+ok(hit1 === true, 'write .tex 触发对账');
+ok((S.stateFor('agent-B') || {}).citeAudit?.includes('<citation_audit>'), 'citeAudit 状态已写入');
+ok(S.auditWrittenFile('agent-B', 'write', { path: path.join(FIX, 'notes.md') }, undefined) === false, '非 .tex/.bib 不触发');
+ok(S.auditWrittenFile('agent-B', 'read', { path: texPath }, undefined) === false, '非写工具不触发');
+
+// ── 10. P2 主动层：会话方向捕获 ───────────────────────────────────────────
+console.log('\n[10] session interests (P2 proactive)');
+S.__reset();
+ok(S.sessionInterestsBlock('sess-1') === '', '空会话 → 空段');
+S.recordSessionTopic('sess-1', 'explain mixture-of-experts load balancing');
+S.recordSessionTopic('sess-1', '现在讲讲 attention 机制');
+const blk = S.sessionInterestsBlock('sess-1');
+ok(blk.startsWith('<scholar_session_interests>') && blk.includes('mixture-of-experts'), '话题已累积进段');
+ok(blk.includes('attention'), '中文消息的概念词也已捕获');
+ok(S.recordSessionTopic('sess-1', 'mixture-of-experts load balancing') === false, '重复话题不重复记录');
+ok(S.recordSessionTopic('', 'anything') === false, '空 sessionKey 拒绝');
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(50));

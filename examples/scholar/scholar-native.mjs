@@ -10,6 +10,14 @@
  *   话题漂移时用纯词法匹配本地论文库（parsed JSON 元数据，零外部依赖），
  *   注入 top-5 相关论文（<literature_context>，预算 ≤2200 chars）。
  *
+ * 反射层（P2）：tools/post-execute（observation-only，不改写结果）
+ *   write / str_replace_editor 写 .tex/.bib 后，提取 \cite/\bibitem 键，
+ *   与本地论文库词法对账，注入 <citation_audit>（order 160）供下一步自我修正。
+ *
+ * 主动层（P2）：session/event（只读）
+ *   捕获 user/message 话题词，累积会话研究方向线程，
+ *   注入 <scholar_session_interests>（order 120）保持长会话方向连贯。
+ *
  * 时序事实（agent.ts:230）：systemPrompt.assemble 发生在 pre-step waterfall 之前，
  * 因此检索结果自下一 step 生效；首个请求依赖 persona 政策驱动模型主动调用
  * mcp__scholar__* 工具检索（两者互补）。
@@ -37,16 +45,22 @@ const SCHOLAR_OFF = process.env.SCHOLAR_OFF === '1';
 const DEBUG = process.env.SCHOLAR_NATIVE_DEBUG === '1';
 
 const PERSONA_ORDER = 110;   // system-prompt README 建议扩展区间 100–199
+const SESSION_ORDER = 120;   // P2 主动层：会话研究方向线程
 const LIT_ORDER = 150;       // 动态段排在静态段之后，漂移时只失效后缀前缀
+const AUDIT_ORDER = 160;     // P2 反射层：引用对账段
 const LIT_BUDGET_CHARS = 2200;   // ≈500 token
 const RULE_MAX_CHARS = 900;      // 每条 rules 文件截断
 const ABSTRACT_SNIPPET = 160;    // 注入行摘要截断
 const INDEX_ABSTRACT = 400;      // 索引内摘要截断（匹配用）
 const TOP_K = 5;
 const MIN_SCORE = 5;
+const MAX_CITE_KEYS = 15;        // 引用对账键上限
+const MAX_SESSION_TOPICS = 30;   // 会话方向线程上限
 
-// 每个 agent 的动态层状态：agentId → { topicHash, litBlock }
+// 每个 agent 的动态层状态：agentId → { topicHash, litBlock, citeAudit }
 const agentState = new Map();
+// 会话研究方向线程：sessionKey（session.id 或 agentId）→ terms[]
+const sessionTopics = new Map();
 // 最近活跃 agent（assemble 时刻 text() 读取——headless 单 agent 场景精确，多 agent 并发时近似）
 let lastActiveAgent = null;
 
@@ -272,6 +286,94 @@ export async function refreshTopic(agentId, messages, signal) {
   return true;
 }
 
+// ── P2 反射层：引用对账 ───────────────────────────────────────────────────
+
+/** 从 LaTeX/BibTeX 文本提取引用键（\cite/\citep/\citet/\bibitem），去重、截断。 */
+export function extractCiteKeys(text) {
+  if (!text) return [];
+  const keys = [];
+  const re = /\\(?:cite|citep|citet|bibitem)\*?(?:\[[^\]]*\]){0,2}\{([^}]+)\}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    for (const k of m[1].split(',')) {
+      const key = k.trim();
+      if (key && !keys.includes(key)) keys.push(key);
+      if (keys.length >= MAX_CITE_KEYS) return keys;
+    }
+  }
+  return keys;
+}
+
+/** 引用对账块：每个键给出库内最近邻（或 none），驱动模型自我修正。 */
+export function buildCitationAudit(keys, index) {
+  if (!keys || !keys.length) return '';
+  const lines = ['<citation_audit>',
+    'Citation keys detected in the latest LaTeX/BibTeX write. Verify each against the local library:'];
+  let used = lines.join('\n').length + '</citation_audit>'.length;
+  for (const key of keys) {
+    const terms = extractTerms(key.replace(/\d+/g, ' '));
+    let line = `- ${key} → nearest: none — verify this reference exists in the library or correct the key`;
+    if (terms.length) {
+      const hits = search(index, terms);
+      if (hits.length) {
+        const h = hits[0];
+        line = `- ${key} → nearest: [${h.id}] ${h.title} (${h.year || 'n.y.'}${h.venue ? ', ' + h.venue : ''}) — confirm this is the intended source`;
+      }
+    }
+    if (used + line.length + 1 > LIT_BUDGET_CHARS) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  lines.push('Cite as paper_id where possible; correct any key without a library counterpart before finishing.');
+  lines.push('</citation_audit>');
+  return lines.join('\n');
+}
+
+/** 反射层挂钩体：write/str_replace_editor 写 .tex/.bib 后触发（observation-only）。 */
+export function auditWrittenFile(agentId, toolName, args, signal) {
+  if (toolName !== 'write' && toolName !== 'str_replace_editor') return false;
+  const p = String(args?.path || args?.file_path || '');
+  if (!/\.(tex|bib)$/i.test(p)) return false;
+  let text = '';
+  try { text = fs.readFileSync(p, 'utf8'); } catch { text = String(args?.content || args?.new_string || ''); }
+  const keys = extractCiteKeys(text);
+  if (!keys.length) return false;
+  const idx = ensureIndex(signal);
+  const st = stateFor(agentId);
+  st.citeAudit = buildCitationAudit(keys, idx);
+  log('citation audit refreshed:', keys.length, 'keys @', path.basename(p));
+  return true;
+}
+
+// ── P2 主动层：会话方向捕获 ───────────────────────────────────────────────
+
+/** 记录一条用户消息的话题词（去重、封顶）。 */
+export function recordSessionTopic(sessionKey, text) {
+  if (!sessionKey) return false;
+  const terms = extractTerms(text).filter(t => t.length >= 3);
+  if (!terms.length) return false;
+  const list = sessionTopics.get(sessionKey) || [];
+  let added = 0;
+  for (const t of terms) {
+    if (!list.includes(t)) { list.push(t); added++; }
+    if (list.length >= MAX_SESSION_TOPICS) break;
+  }
+  if (!added) return false;
+  sessionTopics.set(sessionKey, list);
+  return true;
+}
+
+/** 会话方向线程段（order 120）——空会话返回空串。 */
+export function sessionInterestsBlock(sessionKey) {
+  if (!sessionKey) return '';
+  const list = sessionTopics.get(sessionKey);
+  if (!list || !list.length) return '';
+  return ['<scholar_session_interests>',
+    'Research threads touched in this session (keep direction coherent; surface them when suggesting next steps):',
+    list.slice(-MAX_SESSION_TOPICS).join(', '),
+    '</scholar_session_interests>'].join('\n');
+}
+
 // ── apply ─────────────────────────────────────────────────────────────────
 
 export function apply(ctx, config) {
@@ -294,7 +396,21 @@ export function apply(ctx, config) {
         return st ? st.litBlock : '';
       },
     });
-    log('systemPrompt sections registered: scholar-persona(' + PERSONA_ORDER + '), scholar-literature-context(' + LIT_ORDER + ')');
+    ctx.systemPrompt.section({
+      name: 'scholar-session-interests',
+      order: SESSION_ORDER,
+      text: () => sessionInterestsBlock(lastActiveAgent),
+    });
+    ctx.systemPrompt.section({
+      name: 'scholar-citation-audit',
+      order: AUDIT_ORDER,
+      text: () => {
+        if (!lastActiveAgent) return '';
+        const st = agentState.get(lastActiveAgent);
+        return st ? (st.citeAudit || '') : '';
+      },
+    });
+    log('systemPrompt sections registered: persona(' + PERSONA_ORDER + '), interests(' + SESSION_ORDER + '), lit(' + LIT_ORDER + '), audit(' + AUDIT_ORDER + ')');
   } else {
     warn('ctx.systemPrompt unavailable — plugin inert');
     return;
@@ -313,11 +429,44 @@ export function apply(ctx, config) {
     return decision;
   });
 
-  log('plugin mounted (persona order=' + PERSONA_ORDER + ', lit order=' + LIT_ORDER + ', SCHOLAR_HOME=' + SCHOLAR_HOME + ')');
+  // P2 反射层：写 .tex/.bib 后引用对账（observation-only，绝不改写工具结果）
+  ctx.on('tools/post-execute', async (exec, result, next) => {
+    const decision = await next();
+    if (SCHOLAR_OFF || !exec) return decision;
+    try {
+      const agentId = exec.agent?.id || lastActiveAgent;
+      if (agentId) {
+        lastActiveAgent = agentId;
+        auditWrittenFile(agentId, exec.name, exec.arguments, exec.signal);
+      }
+    } catch (e) {
+      warn('post-execute audit failed: ' + (e?.message || e));
+    }
+    return decision;
+  });
+
+  // P2 主动层：只读捕获用户消息话题词
+  ctx.on('session/event', (session, event) => {
+    if (SCHOLAR_OFF) return;
+    try {
+      if (event?.type !== 'user/message') return;
+      const key = session?.id || lastActiveAgent;
+      const text = extractUserText([{ role: 'user', content: event?.data?.content }]);
+      if (key && text) {
+        const had = (sessionTopics.get(key) || []).length > 0;
+        if (recordSessionTopic(key, text) && !had) log('session interests started:', key);
+      }
+    } catch (e) {
+      warn('session capture failed: ' + (e?.message || e));
+    }
+  });
+
+  log('plugin mounted (persona order=' + PERSONA_ORDER + ', interests order=' + SESSION_ORDER + ', lit order=' + LIT_ORDER + ', audit order=' + AUDIT_ORDER + ', SCHOLAR_HOME=' + SCHOLAR_HOME + ')');
 }
 
 // 供 self-test / e2e 复位（多进程下无影响）
 export function __reset() {
   agentState.clear();
+  sessionTopics.clear();
   lastActiveAgent = null;
 }
