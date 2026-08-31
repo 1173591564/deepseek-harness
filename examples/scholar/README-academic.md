@@ -28,6 +28,20 @@ cd deepseek-harness && pnpm install   # 运行方式见上游 README
 dsh --profile headless
 ```
 
+## 连接团队服务器索引（无本地知识库时）
+
+安装后默认连 `localhost`（端口 5433/7687）。首次运行 `scholar init` 会引导本地建库；
+若直接使用团队服务器上的共享索引，配置环境变量（或 `<home>/.scholar/.env`）：
+
+```
+SCHOLAR_PG_HOST=<服务器IP>   SCHOLAR_PG_PORT=5432   SCHOLAR_PG_NAME=scholar
+SCHOLAR_PG_USER=scholar      SCHOLAR_PG_PASS=<向管理员获取>
+SCHOLAR_NEO4J_URI=bolt://<服务器IP>:7687
+SCHOLAR_NEO4J_USER=neo4j     SCHOLAR_NEO4J_PASS=<向管理员获取>
+```
+
+服务器端口默认仅对 SSH 隧道开放，访问权限向管理员申请。
+
 ## 验证
 
 - `scholar search transformer` — 能连上知识库（本地或服务器索引）
