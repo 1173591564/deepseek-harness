@@ -1,0 +1,57 @@
+# Scholar 第一阶段组合
+
+[English](README.md) | 中文
+
+本 example 通过已发布的 Cordis package 将 Scholar Studio 与 DSH 组合。可复用的 prompt、citation、lifecycle 与 security 行为归 [`@deepseek-ai/dsh-scholar-native`](../../packages/context/scholar-native/README.md) 和 [`@deepseek-ai/dsh-mcp-client`](../../packages/mcp/mcp-client/README.md) 所有。
+
+## 拓扑
+
+- Local 模式通过 stdio 启动 `python -m scholar_mcp`，并可读取独立安装的本地 corpus data pack。
+- Remote 模式直连 Scholar Streamable HTTP endpoint。Server 拥有 central corpus、embedding 与 vector index。
+- 两种模式都将 15 个固定 Scholar skill 保留为 client asset。
+- Scholar connection 与 tool synchronization 是 mandatory；academic composition 使用 `failOnStartupError: true`。
+
+Team authorization、quota、centralized audit 与 tenant corpus isolation 属于后续 Proxy Hub，不属于 direct-client composition。
+
+## 本地开发安装
+
+挂载 example 前先安装 Scholar Studio 0.2.3 并初始化本地资产：
+
+```sh
+python -m pip install scholar-studio==0.2.3
+scholar init
+node examples/scholar/setup.mjs
+```
+
+Setup script 会保留不相关的 profile 内容，并安装 stdio MCP client、隔离的 Scholar skill provider 和 native Scholar context package。只移除其 managed block：
+
+```sh
+node examples/scholar/setup.mjs uninstall
+```
+
+## Release 安装
+
+Release bundle 包含 `scholar_studio-0.2.3-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 都会先初始化 15 个本地 skill，再生成引用 credential 的 DSH configuration。默认 endpoint 是供 SSH tunnel 使用的 loopback；公网 endpoint 必须显式提供 HTTPS。
+
+```sh
+SCHOLAR_REMOTE_URL=https://scholar.example/mcp bash install.sh
+```
+
+Token 以不回显方式读取并通过 stdin 传递。它存入 DSH managed credential，不会写入 YAML 或 process argument。
+
+## 验证
+
+运行 example 验证套件：
+
+```sh
+pnpm exec vitest run --config vitest.e2e.config.ts \
+  examples/scholar/tests/scholar.e2e.ts
+```
+
+Keyless case 会启动真实 Loader configuration。存在 `DEEPSEEK_API_KEY` 时，真实 model 必须调用 Scholar MCP tool，测试验证 fixture server 的 audit record，而不接受 model prose。Scholar server protocol suite 另行覆盖缺失、错误与有效 Bearer authentication、MCP initialization、精确 16-tool catalog、lexical search 与 semantic search。Wheel 与 corpus data 保持为独立 artifact。
+
+## 已知限制
+
+- Remote operation 需要可用的 Scholar service 与 credential reference。
+- Local literature ranking 需要独立安装的 data pack。
+- Repository with-key smoke 使用本地 MCP fixture。Deployment release 仍需对其外部托管 endpoint 运行相同 protocol checks。

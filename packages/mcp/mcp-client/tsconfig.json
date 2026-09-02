@@ -19,6 +19,15 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../credentials/credentials"
+    },
+    {
+      "path": "../../credentials/credentials-local"
+    },
+    {
+      "path": "../../util/launch-environment"
+    },
+    {
       "path": "../../core/tools"
     },
     {

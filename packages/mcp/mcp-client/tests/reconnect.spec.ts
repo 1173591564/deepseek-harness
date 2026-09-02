@@ -190,7 +190,8 @@ describe('reconnect supervisor', () => {
     expect(ctx.tools.get('mcp__srv__remote')).toBeUndefined()
     // Initial connect + exactly maxAttempts reconnect attempts.
     expect(mockConnect).toHaveBeenCalledTimes(3)
-    expect(warns.some(line => line.includes('connection attempt failed: Error: server gone'))).toBe(true)
+    expect(warns.some(line => line.includes('connection attempt failed (Error)'))).toBe(true)
+    expect(warns.every(line => !line.includes('server gone'))).toBe(true)
     expect(warns.some(line => line.includes('connection failed; retrying in 4ms (attempt 2/2)'))).toBe(true)
     await sleep(30)
     expect(mockConnect).toHaveBeenCalledTimes(3)

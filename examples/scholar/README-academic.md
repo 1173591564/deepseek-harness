@@ -1,68 +1,69 @@
-# Scholar DSH 学术专用版（v0.2.3）
+# Scholar DSH 学术专用版 0.2.3
 
-deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇论文 / 16k sections / 43k 引用网络）以原生 Cordis 插件方式挂进 dsh，模型无需显式指令即可感知馆藏并自动引用。
+该 bundle 为 DSH 第一阶段学术组合提供 Scholar Studio wheel 与跨平台 installer。Remote 模式采用 DSH client 直连 Scholar Streamable HTTP server；Local 模式通过 stdio 启动同一 Scholar MCP surface。
 
 ## 内容物
 
-- `scholar_studio-0.2.3-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
-- `install.ps1` / `install.sh` — 一键安装（wheel 直装 + `scholar init-dsh`）
-- 本 README
+- `scholar_studio-0.2.3-py3-none-any.whl`：Scholar CLI、MCP server 与 15 个固定本地 skill。
+- `install.sh`：Linux/macOS installer。
+- `install.ps1`：PowerShell installer。
+- 本 README。
+
+论文 corpus 不在 wheel 中。Remote server 拥有 central corpus、embedding 与 vector index；Local stdio 可使用单独安装并校验的 data pack。
 
 ## 前置要求
 
-- Python ≥ 3.10（PATH 中的 `python` / `python3`）
-- dsh 本体：克隆本仓库 `experiment/dashboard-provider` 分支并按上游 README 以源码方式运行（Node/Bun 环境）
-- DeepSeek API Key
+- Python 3.10 或更高版本。
+- 包含 `@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-scholar-native` 与 `@deepseek-ai/dsh-skill-filesystem` 的 DSH checkout。
+- DeepSeek API key。
+- Remote 模式所需的 Scholar Bearer token。
 
-## 安装（3 步，服务器公网模式——推荐，论文数据零分发）
+## Remote 安装
 
-```bash
-# 1) dsh 本体（源码运行）
-git clone https://github.com/1173591564/deepseek-harness -b experiment/dashboard-provider
-cd deepseek-harness && pnpm install   # 运行方式见上游 README
+公网 endpoint 必须使用 HTTPS：
 
-# 2) 解压本 Release 的 bundle，安装 scholar 插件层（人格/技能/规则，无需本地数据）
-#    Windows: .\install.ps1    Linux/macOS: bash install.sh
-#    会提示输入访问 token（管理员私发），然后自动执行：
-#    scholar init-dsh --remote http://47.108.198.147:9845/mcp --token <token>
-
-# 3) 启动
-dsh --profile headless          # CLI one-shot（headless patch 通道）
-
-#    Web UI：dsh web 启动后，设置 → Agent 预设 → 自定义 →「学术模式」
+```sh
+SCHOLAR_REMOTE_URL=https://scholar.example/mcp bash install.sh
 ```
 
-数据与索引（563 篇 parsed、pgvector、引用图、embedding）全部在服务器的
-`scholar-mcp` 服务上（systemd，MCP over HTTP + Bearer 鉴权），客户端只发
-MCP 调用——无需 PG 凭据、无需 embedding key、无需任何论文文件、无需 SSH 隧道。
+默认 endpoint 为 `http://127.0.0.1:9845/mcp`，仅用于显式 SSH tunnel：
 
-**备用（隧道模式）**：公网不可达时 `ssh -N -L 9845:127.0.0.1:9845 server-47`
-开隧道，再跑 `scholar init-dsh --remote http://127.0.0.1:9845/mcp`（无需 token，
-SSH 认证兜底）。
+```sh
+ssh -N -L 9845:127.0.0.1:9845 scholar-server
+bash install.sh
+```
 
-## 本地模式（自带知识库，可选）
+Installer 依次安装 0.2.3 wheel、初始化 15 个本地 skill，并调用 `scholar init-dsh --remote ... --token-stdin`。Token 输入不回显，通过 stdin 传递，并存入 DSH owner-only managed credential；YAML 与 process argument 只包含 credential reference。
 
-不连服务器也可以完全本地化：`scholar init` 建库 + `scholar sync` 刷索引 +
-`scholar init-dsh`（不带 --remote），MCP 以 stdio 跑在本机，数据自持。
+Scholar connection 与 16-tool synchronization 使用 `failOnStartupError: true`。缺失或错误的 credential 会使学术组合启动失败，不会静默降级。
+
+## Local stdio 安装
+
+本地数据模式先安装独立 data pack，再运行：
+
+```sh
+python -m pip install scholar_studio-0.2.3-py3-none-any.whl
+scholar init
+scholar init-dsh
+```
+
+`scholar init-dsh` 保留无关 DSH profile 内容，并同时生成 headless patch 与 academic preset。Scholar native context 使用 DSH package，不从 wheel 安装 ad-hoc JavaScript plugin。
 
 ## 验证
 
-- `scholar search transformer` — 能连上知识库（本地或服务器索引）
-- dsh 冒烟：不带任何显式指令问“推荐一篇注意力机制相关的论文”，回复应自动引用馆藏 ULID
-- 挂载日志：`[scholar-native] indexed N papers` / `mcp-scholar server started`
+```sh
+scholar --help
+scholar init-dsh --check --remote https://scholar.example/mcp
+dsh --profile headless "用 scholar 工具查询知识库统计"
+```
 
-## 功能层
-
-| 层 | 机制 |
-|---|---|
-| P1 静态 | 学术人格 + 引用政策 + 15 技能目录（systemPrompt 注入） |
-| P1 动态 | pre-step 词法检索，每步 top-5 命中注入 `<scholar_context>` |
-| P2 反射 | 写 .tex/.bib 自动 `\cite` 键对账 `<citation_audit>`（observation-only） |
-| P2 主动 | 会话话题捕获 `<scholar_session_interests>`，跨轮方向记忆 |
+Release validation 还会检查 wheel version、15 个 skill、clean HOME、现有文件保留、credential YAML、owner-only permission、malformed credential rollback，以及配置和 process argument 中不存在 literal token。
 
 ## 卸载
 
-```bash
-scholar init-dsh --uninstall   # 移除 headless patch 段 + academic 预设目录
+```sh
+scholar init-dsh --uninstall
 python -m pip uninstall scholar-studio
 ```
+
+团队权限、tenant policy、quota、centralized audit 与 corpus isolation 属于第二阶段 Proxy Hub。

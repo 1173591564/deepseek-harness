@@ -24,9 +24,10 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
   config:
     serverName: web
     transport: streamable-http
-    url: http://localhost:3000/mcp
+    url: https://mcp.example/mcp
+    bearerTokenEnv: MCP_WEB_TOKEN
     headers:
-      Authorization: !!js '`Bearer ${process.env.MCP_TOKEN}`'
+      X-Client-Version: dsh
 ```
 
 模型会看到 `mcp__github__create_issue`、`mcp__web__search` 等工具，这与 Claude Code 和 Codex 使用的服务器限定形状相同。HMR（热模块替换）支持热替换：编辑配置项会触发断开 + 重新连接，无需重启进程；`serverName` 不变时会生成完全相同的工具名称。
@@ -42,7 +43,8 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 | `env` | stdio | 否 | 合并到已清理环境中的额外环境变量 |
 | `cwd` | stdio | 否 | 子进程工作目录 |
 | `url` | http | 是 | MCP 服务器 URL |
-| `headers` | http | 否 | 额外标头（例如认证 token） |
+| `headers` | http | 否 | 非敏感额外标头。静态认证、cookie、API-key-like、forwarding 和 Host 标头会被拒绝 |
+| `bearerTokenEnv` | http | 否 | 每次 HTTP 操作前解析为 Bearer token 的 credential reference |
 | `toolCallTimeoutMs` | 两者 | 否 | 每次 `callTool` 调用的超时（默认 60000） |
 | `failOnStartupError` | 两者 | 否 | 初始连接或工具同步失败时拒绝插件激活（默认 `false`） |
 | `reconnect.enabled` | 两者 | 否 | 连接丢失后自动重新连接（默认 `true`） |
@@ -62,6 +64,7 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 ## 行为
 
 - 连接时：插件激活会等待 `listTools()`，并在组合开始首个轮次前通过 `ctx.tools.register()` 以公开名称注册每个工具。初始连接、发现或注册失败始终会记录日志；`failOnStartupError` 为 true 时拒绝激活，否则插件仍会激活但不注册工具。
+- Streamable HTTP 接受 HTTPS endpoint 与显式 HTTP loopback endpoint。每次操作都会解析 `bearerTokenEnv`，拒绝 redirect，并在引用凭证缺失时于网络访问前失败。
 - 监听 `notifications/tools/list_changed` → 重新同步；获取阶段失败时保留上一世代的注册，注册冲突则会回滚本次尝试的世代，并且不保留该服务器的任何工具。
 - 工具执行：`client.callTool({ name: rawName, arguments }, { signal })`，支持超时 + 中止；公开名称绝不会发给服务器。
 - 规范成功值是 `{ content: JsonValue[], structuredContent? }`；完整的 JSON MCP 块会保留给编程调用方。受支持且已声明的 `outputSchema` 会验证 `structuredContent`；不受支持的 schema 词汇会回退为不受约束的 `JsonValue`。

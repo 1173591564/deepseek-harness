@@ -15,7 +15,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { isIP } from 'node:net'
 import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './connection.ts'
 import type { ReconnectConfig } from './connection.ts'
 // Side-effect type import: declaration-merges `ctx.tools` onto Context.
@@ -35,6 +38,56 @@ const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000
 
 /** Valid `serverName`, kept below the public tool-name budget. */
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
+
+/** Header names that must be owned by the transport or credential seam. */
+const FORBIDDEN_HTTP_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'host',
+  'proxy-authorization',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+])
+
+/** Whether a parsed URL hostname is an exact loopback address. */
+function isLoopbackHostname(hostname: string): boolean {
+  const value = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (value === '::1') return true
+  if (isIP(value) !== 4) return false
+  return value.split('.')[0] === '127'
+}
+
+/** Validate the Streamable HTTP trust boundary before any effect starts. */
+function validateHttpConfig(config: StreamableHttpConfig): void {
+  let url: URL
+  try {
+    url = new URL(config.url)
+  } catch {
+    throw new Error(`mcp-client(${config.serverName}): url must be an absolute HTTP(S) URL`)
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new Error(`mcp-client(${config.serverName}): url must not contain userinfo`)
+  }
+  if (url.hash !== '') {
+    throw new Error(`mcp-client(${config.serverName}): url must not contain a fragment`)
+  }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHostname(url.hostname))) {
+    throw new Error(
+      `mcp-client(${config.serverName}): streamable-http requires HTTPS or an HTTP loopback URL`,
+    )
+  }
+  for (const header of Object.keys(config.headers)) {
+    if (FORBIDDEN_HTTP_HEADERS.has(header.toLowerCase())) {
+      throw new Error(
+        `mcp-client(${config.serverName}): static header "${header}" is reserved; use a credential reference for authentication`,
+      )
+    }
+  }
+}
 
 /**
  * Live `serverName` reservations per app, keyed off `ctx.root` (multiple apps
@@ -86,6 +139,8 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
+  /** Credential reference resolved as an HTTP Bearer token for every request. */
+  bearerTokenEnv?: string
   /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
@@ -121,6 +176,7 @@ export const Config = z.union([
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
     url: z.string().required(),
     headers: z.dict(String).default({}),
+    bearerTokenEnv: z.string().role('credential-ref'),
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
@@ -142,6 +198,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // construction that bypassed Schemastery) rejects THIS instance before any
   // effect registers.
   const reconnect = resolveReconnectPolicy(config.reconnect, `mcp-client(${config.serverName}): reconnect`)
+  let resolveBearerToken: (() => Promise<string>) | undefined
+  if (config.transport === 'streamable-http') {
+    validateHttpConfig(config)
+    if (config.bearerTokenEnv !== undefined) {
+      const ref = credentialRef(config.bearerTokenEnv)
+      resolveBearerToken = async () => {
+        const credentials = ctx.get('credentials')
+        const hit = credentials === undefined
+          ? launchEnvironmentOf(ctx).get(ref)
+          : await credentials.resolve(ref)
+        if (hit !== undefined && hit.value.length > 0) return hit.value
+        throw new Error(
+          `mcp-client(${config.serverName}): credential "${ref}" is not configured`,
+        )
+      }
+    }
+  }
 
   // Reserve the namespace next: a duplicate `serverName` fails THIS instance
   // at load with an actionable error and leaves the earlier instance intact.
@@ -163,7 +236,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // The supervisor owns the client/transport generations, the reconnect
   // loop, and the live tool registrations; disposal stops reconnection,
   // quiesces in-flight work, and unregisters the current generation.
-  const connection = startConnection(ctx, config, reconnect)
+  const connection = startConnection(ctx, config, reconnect, resolveBearerToken)
 
   ctx.effect(() => {
     return () => connection.dispose()

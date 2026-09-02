@@ -74,9 +74,10 @@ type Config = StdioConfig | StreamableHttpConfig
   config:
     serverName: web
     transport: streamable-http
-    url: http://localhost:3000/mcp
+    url: https://mcp.example/mcp
+    bearerTokenEnv: MCP_WEB_TOKEN
     headers:
-      Authorization: !!js `Bearer ${process.env.MCP_TOKEN}`
+      X-Client-Version: dsh
 ```
 
 模型看到的是 `mcp__github__create_issue`、`mcp__github__search_code`、`mcp__web__search`。
@@ -84,6 +85,8 @@ type Config = StdioConfig | StreamableHttpConfig
 ### 生命周期
 
 启动时从 `cordis.yml` 加载。HMR（热模块替换）（`@cordisjs/plugin-hmr`）提供热替换：编辑 yml 条目触发旧实例的 dispose（资源释放）（断开连接、注销工具），并创建新实例（连接、发现、注册）。目前不提供运行时动态 API。公开名称是 `(serverName, rawName)` 的纯函数，因此保持 `serverName` 不变的 HMR 替换会重建完全相同的模型可见名称——会话历史和权限规则保持有效——而添加或移除不相关的服务器永远不会重命名已有工具。
+
+Streamable HTTP 除显式 loopback endpoint 外必须使用 HTTPS。`bearerTokenEnv` 指向每次 HTTP 操作前解析的 credential reference，因此凭证轮换会作用于下一次请求，缺失凭证会在网络访问前失败。静态认证、cookie、API-key-like、forwarding 和 Host 标头会被拒绝；redirect 永远不会被跟随。
 
 ### 工具发现与注册
 

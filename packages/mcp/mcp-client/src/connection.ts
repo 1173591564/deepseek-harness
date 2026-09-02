@@ -111,6 +111,11 @@ export interface ConnectionHandle {
   dispose(): Promise<void>
 }
 
+/** Stable diagnostic category that excludes remote error text and request data. */
+function errorKind(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error
+}
+
 /**
  * Start the supervised connection for one MCP server and keep it alive per
  * the reconnect policy.
@@ -118,9 +123,15 @@ export interface ConnectionHandle {
  * @param ctx - Cordis context providing the `tools` registry and logger.
  * @param config - Resolved plugin config selecting the transport and server identity.
  * @param policy - Resolved reconnect policy from {@link resolveReconnectPolicy}.
+ * @param resolveBearerToken - Optional per-request Bearer credential resolver.
  * @returns Handle with a `ready` promise for startup-await and a `dispose` for teardown.
  */
-export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
+export function startConnection(
+  ctx: Context,
+  config: Config,
+  policy: ResolvedReconnectPolicy,
+  resolveBearerToken?: () => Promise<string>,
+): ConnectionHandle {
   const label = `mcp-client(${config.serverName})`
   const opts: ToolBridgeOptions = {
     registrationFailure: 'contain',
@@ -264,12 +275,12 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         } catch (error) {
           // Fetch-phase failure: the previous generation is still registered
           // and `disposers` still owns it — keep serving the last good list.
-          if (!disposed) ctx.logger.error(`${label}: tool re-sync failed: ${String(error)}`)
+          if (!disposed) ctx.logger.error(`${label}: tool re-sync failed (${errorKind(error)})`)
         }
       },
     )
     try {
-      await generation.connect(createTransport(config))
+      await generation.connect(createTransport(config, resolveBearerToken))
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)
@@ -280,7 +291,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       if (firstAttemptError === undefined) firstAttemptError = error
       // Disposal clears current ownership before it closes the generation, so
       // only a live supervisor reports an attempt failure.
-      if (isCurrent(generation)) ctx.logger.warn(`${label}: connection attempt failed: ${String(error)}`)
+      if (isCurrent(generation)) ctx.logger.warn(`${label}: connection attempt failed (${errorKind(error)})`)
       try { await generation.close() } catch { /* transport already gone */ }
       const quiesced = hasClosed() || await waitForClose(closed.promise)
       attemptSettled = true
