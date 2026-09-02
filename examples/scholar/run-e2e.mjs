@@ -109,6 +109,17 @@ console.log('\n[J10] 主动层：会话方向捕获启动');
 judge(/session interests started/.test(r5out), 'session interests 日志出现');
 rmSync(r5dir, { recursive: true, force: true });
 
+// ── R6：J11 阶梯行为（digest→section 阅读链，v0.2.0 上下文经济）────────────
+console.log('\n[R6] task: 阶梯行为探针（论文细节应经 scholar_section 获取）');
+const { out: r6out, code: r6code } = await runDsh(
+  '知识库里 3D Gaussian Splatting 这篇论文的 Optimization 部分讲了什么？请基于论文内容回答，并给出该论文的 paper_id');
+console.log(`  exit=${r6code}`);
+console.log('  | ' + r6out.split('\n').filter(l => /scholar_info|scholar_section|CallTool|adaptive|density|01[A-Z0-9]{6}/i.test(l)).slice(0, 6).map(l => '    | ' + l.trim().slice(0, 140)).join('\n  | '));
+
+console.log('\n[J11] 阶梯行为：答案锚定论文事实（ULID + 章节术语）');
+judge(/01[0-9A-Z]{24}/.test(r6out.split('topic refreshed').pop() || ''), '回复含真实馆藏 paper_id');
+judge(/adaptive density|density control/i.test(r6out.split('topic refreshed').pop() || ''), '答案含论文章节事实（adaptive density control）');
+
 // ── 挂载证据（任一运行的输出即可）────────────────────────────────────────
 console.log('\n[J1] 三插件挂载 + 无 DB 优雅降级');
 judge(r3out.includes('[scholar-native] plugin mounted'), 'scholar-native 挂载日志');

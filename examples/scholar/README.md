@@ -1,6 +1,6 @@
 # scholar — Scholar Studio 原生接入 dsh（学术工作者实验 · P1）
 
-把 [Scholar Studio](https://github.com/1173591564/academic-based-qoder)（581 篇 AI 论文知识库 + 55 MCP 工具 + 15 学术技能）通过**原生 Cordis 插件**接入 deepseek-harness，让 dsh 从"显式调用 scholar 工具的 coding agent"变成**带文献环境感知的学术工作者**——不靠 skill 触发，谈技术时自动"想起"馆藏论文。
+把 [Scholar Studio](https://github.com/1173591564/academic-based-qoder)（581 篇 AI 论文知识库 + 16 MCP 工具（阅读阶梯）+ 15 学术技能）通过**原生 Cordis 插件**接入 deepseek-harness，让 dsh 从"显式调用 scholar 工具的 coding agent"变成**带文献环境感知的学术工作者**——不靠 skill 触发，谈技术时自动"想起"馆藏论文。
 
 与 `examples/headless-dashboard`（memory 实验）同构：**零 dsh 源码改动**，全部内容在本目录，`setup.mjs uninstall` 即彻底移除。
 
@@ -8,7 +8,7 @@
 
 ```
 ~/.dsh/profiles/headless/cordis.patch.yml  >>> scholar <<< 段（insert 语法）
-  ├─ id: mcp-scholar       @deepseek-ai/dsh-mcp-client   ← 工具层（55 工具）
+  ├─ id: mcp-scholar       @deepseek-ai/dsh-mcp-client   ← 工具层（16 工具）
   │    stdio → python -m scholar_mcp
   │    env: SCHOLAR_HOME（知识库根，静态）
   │         SCHOLAR_WORKSPACE: !!js process.cwd()（★每次启动绑定当前目录）
@@ -110,6 +110,15 @@ dsh --profile headless "解释一下 mixture-of-experts 模型中的负载均衡
 
 ## 已知边界与后续
 
+- **v0.2.0 上下文经济重构**（scholar 侧）：
+  - MCP 模型面 **55 → 16 工具**：阅读阶梯 search/vec_search（找论文）→ info（摘要+节目录）→
+    section（按节读取，~1.6K 字符/节）；passages（片段定位）；横向 cite_network/lineage/graph_query/graph_stats；
+    read_parsed_paper 默认摘要卡、`full=true` 逃生门（200KB 截断）
+  - **Neo4j 退役**：引用/概念图改为内存图（scholar/graph_mem.py，networkx），
+    从 parsed JSON 秒级重建 + graph.json 缓存；`scholar sync` 一条命令刷新全部派生索引
+  - **PG/pgvector 保留**：新表 `paper_vectors`（563 篇 `[标题+摘要]` 各一向量，L1 语义检索）；
+    chunks（54k）保留为片段定位层，BM25 修复为全量覆盖
+  - 维护类/重复皮工具（parse/rag-index/graph-build/stats/scan/quality/... 共 39 个）撤出 MCP，保留 CLI
 - **P2 已实现（v0.1.4）**：
   - 反射层 `tools/post-execute`——write/str_replace_editor 写 `.tex/.bib` 后自动提取
     `\cite/\citep/\citet/\bibitem` 键，与库内元数据词法对账，注入 `<citation_audit>`（order 160）；
@@ -117,14 +126,10 @@ dsh --profile headless "解释一下 mixture-of-experts 模型中的负载均衡
     注入 `<scholar_session_interests>`（order 120）；首次捕获打 `session interests started` 日志；
   - rules 分发——`scholar init-dsh` 将包内 `templates/dsh/rules/` 落到知识库
     （copy-if-missing，不覆盖用户自定义）
-- **P2 e2e 待补**：J9（citation audit 实跑）与 5 个级联判据因 DeepSeek 余额耗尽未跑完，
-  充值后重跑 `node run-e2e.mjs` 即可（R1 两轮核心判据在断供前已全过）
 - **P3 习惯层/记忆层**：dsh jobs 定时 kb-update/auto-notes；腾讯 Agent Memory session-init
   串入 pre-step（memory-native 已验证），研究方向加权检索
 - **词法检索边界**：英文术语为主信号；中文话题依赖 CJK 二元组 + 查询中的英文术语，
-  双语 glossary 留 P2；`moe` 这类缩写靠 tags 字段命中
-- **token 预算**：55 工具全量挂载实测可接受；若需减载，scholar 侧加 `--group` 分组后按
-  profile 挂子集（环境注入到位后，常驻工具可缩到 search/read/stats 三四个）
+  双语 glossary 留后续；`moe` 这类缩写靠 tags 字段命中
 - **R1 发布**：wheel 捆绑 dsh 插件模板 + `scholar init-dsh`；服务器 pypiserver + KB 集中化
 - 多 agent 并发场景下 literature-context 段取"最近活跃 agent"（headless 单 agent 精确），
   按 agent scope 注册留待按需演进

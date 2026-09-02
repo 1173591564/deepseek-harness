@@ -1,10 +1,10 @@
-# Scholar DSH 学术专用版（v0.1.4）
+# Scholar DSH 学术专用版（v0.2.0）
 
 deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇论文 / 16k sections / 43k 引用网络）以原生 Cordis 插件方式挂进 dsh，模型无需显式指令即可感知馆藏并自动引用。
 
 ## 内容物
 
-- `scholar_studio-0.1.4-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
+- `scholar_studio-0.2.0-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
 - `install.ps1` / `install.sh` — 一键安装（wheel 直装 + `scholar init-dsh`）
 - 本 README
 
@@ -36,8 +36,6 @@ dsh --profile headless
 ```
 SCHOLAR_PG_HOST=<服务器IP>   SCHOLAR_PG_PORT=5432   SCHOLAR_PG_NAME=scholar
 SCHOLAR_PG_USER=scholar      SCHOLAR_PG_PASS=<向管理员获取>
-SCHOLAR_NEO4J_URI=bolt://<服务器IP>:7687
-SCHOLAR_NEO4J_USER=neo4j     SCHOLAR_NEO4J_PASS=<向管理员获取>
 ```
 
 服务器端口默认仅对 SSH 隧道开放，访问权限向管理员申请。
