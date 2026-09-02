@@ -14,34 +14,32 @@ deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇�
 - dsh 本体：克隆本仓库 `experiment/dashboard-provider` 分支并按上游 README 以源码方式运行（Node/Bun 环境）
 - DeepSeek API Key
 
-## 安装（3 步）
+## 安装（3 步，服务器模式——推荐，论文数据零分发）
 
 ```bash
 # 1) dsh 本体（源码运行）
 git clone https://github.com/1173591564/deepseek-harness -b experiment/dashboard-provider
 cd deepseek-harness && pnpm install   # 运行方式见上游 README
 
-# 2) 解压本 Release 的 bundle，安装 scholar 后端 + 挂载
+# 2) 解压本 Release 的 bundle，安装 scholar 插件层（人格/技能/规则，无需本地数据）
 #    Windows: .\install.ps1    Linux/macOS: bash install.sh
+#    安装脚本会执行：scholar init-dsh --remote http://127.0.0.1:9845/mcp
 
-# 3) 启动
+# 3) 开一条 SSH 隧道（唯一依赖），启动
+ssh -N -L 9845:127.0.0.1:9845 <服务器别名> &
 dsh --profile headless          # CLI one-shot（headless patch 通道）
 
 #    Web UI：dsh web 启动后，设置 → Agent 预设 → 自定义 →「学术模式」
-#    （init-dsh 会生成用户级学术模式预设：standard 工具集 + scholar 阅读阶梯 + 人格）
 ```
 
-## 连接团队服务器索引（无本地知识库时）
+数据与索引（563 篇 parsed、pgvector、引用图、embedding）全部在服务器的
+`scholar-mcp` 服务上（systemd），客户端只发 MCP 调用——无需 PG 凭据、
+无需 embedding key、无需任何论文文件。
 
-安装后默认连 `localhost`（端口 5433/7687）。首次运行 `scholar init` 会引导本地建库；
-若直接使用团队服务器上的共享索引，配置环境变量（或 `<home>/.scholar/.env`）：
+## 本地模式（自带知识库，可选）
 
-```
-SCHOLAR_PG_HOST=<服务器IP>   SCHOLAR_PG_PORT=5432   SCHOLAR_PG_NAME=scholar
-SCHOLAR_PG_USER=scholar      SCHOLAR_PG_PASS=<向管理员获取>
-```
-
-服务器端口默认仅对 SSH 隧道开放，访问权限向管理员申请。
+不连服务器也可以完全本地化：`scholar init` 建库 + `scholar sync` 刷索引 +
+`scholar init-dsh`（不带 --remote），MCP 以 stdio 跑在本机，数据自持。
 
 ## 验证
 
