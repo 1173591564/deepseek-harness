@@ -1,10 +1,10 @@
-# Scholar DSH 学术专用版（v0.2.1）
+# Scholar DSH 学术专用版（v0.2.3）
 
 deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇论文 / 16k sections / 43k 引用网络）以原生 Cordis 插件方式挂进 dsh，模型无需显式指令即可感知馆藏并自动引用。
 
 ## 内容物
 
-- `scholar_studio-0.2.1-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
+- `scholar_studio-0.2.3-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
 - `install.ps1` / `install.sh` — 一键安装（wheel 直装 + `scholar init-dsh`）
 - 本 README
 
@@ -14,7 +14,7 @@ deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇�
 - dsh 本体：克隆本仓库 `experiment/dashboard-provider` 分支并按上游 README 以源码方式运行（Node/Bun 环境）
 - DeepSeek API Key
 
-## 安装（3 步，服务器模式——推荐，论文数据零分发）
+## 安装（3 步，服务器公网模式——推荐，论文数据零分发）
 
 ```bash
 # 1) dsh 本体（源码运行）
@@ -23,18 +23,22 @@ cd deepseek-harness && pnpm install   # 运行方式见上游 README
 
 # 2) 解压本 Release 的 bundle，安装 scholar 插件层（人格/技能/规则，无需本地数据）
 #    Windows: .\install.ps1    Linux/macOS: bash install.sh
-#    安装脚本会执行：scholar init-dsh --remote http://127.0.0.1:9845/mcp
+#    会提示输入访问 token（管理员私发），然后自动执行：
+#    scholar init-dsh --remote http://47.108.198.147:9845/mcp --token <token>
 
-# 3) 开一条 SSH 隧道（唯一依赖），启动
-ssh -N -L 9845:127.0.0.1:9845 <服务器别名> &
+# 3) 启动
 dsh --profile headless          # CLI one-shot（headless patch 通道）
 
 #    Web UI：dsh web 启动后，设置 → Agent 预设 → 自定义 →「学术模式」
 ```
 
 数据与索引（563 篇 parsed、pgvector、引用图、embedding）全部在服务器的
-`scholar-mcp` 服务上（systemd），客户端只发 MCP 调用——无需 PG 凭据、
-无需 embedding key、无需任何论文文件。
+`scholar-mcp` 服务上（systemd，MCP over HTTP + Bearer 鉴权），客户端只发
+MCP 调用——无需 PG 凭据、无需 embedding key、无需任何论文文件、无需 SSH 隧道。
+
+**备用（隧道模式）**：公网不可达时 `ssh -N -L 9845:127.0.0.1:9845 server-47`
+开隧道，再跑 `scholar init-dsh --remote http://127.0.0.1:9845/mcp`（无需 token，
+SSH 认证兜底）。
 
 ## 本地模式（自带知识库，可选）
 
