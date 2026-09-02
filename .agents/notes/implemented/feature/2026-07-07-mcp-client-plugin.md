@@ -74,9 +74,10 @@ Example `cordis.yml` usage:
   config:
     serverName: web
     transport: streamable-http
-    url: http://localhost:3000/mcp
+    url: https://mcp.example/mcp
+    bearerTokenEnv: MCP_WEB_TOKEN
     headers:
-      Authorization: !!js `Bearer ${process.env.MCP_TOKEN}`
+      X-Client-Version: dsh
 ```
 
 The model sees `mcp__github__create_issue`, `mcp__github__search_code`, `mcp__web__search`.
@@ -84,6 +85,8 @@ The model sees `mcp__github__create_issue`, `mcp__github__search_code`, `mcp__we
 ### Lifecycle
 
 Boot-time from `cordis.yml`. HMR (`@cordisjs/plugin-hmr`) provides hot-swap: editing the yml entry triggers dispose of the old instance (disconnects, unregisters tools) and creation of a new one (connects, discovers, registers). No runtime-dynamic API for now. Public names are pure functions of `(serverName, rawName)`, so an HMR swap that keeps `serverName` recreates identical model-facing names — session history and permission rules stay valid — and adding or removing an unrelated server never renames an existing tool.
+
+Streamable HTTP requires HTTPS except for explicit loopback endpoints. `bearerTokenEnv` names a credential reference resolved before every HTTP operation, so rotation applies to the next request and a missing credential fails before network access. Static authentication, cookie, API-key-like, forwarding, and Host headers are rejected; redirects are never followed.
 
 ### Tool discovery and registration
 

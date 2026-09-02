@@ -22,6 +22,8 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { CallId } from '@deepseek-ai/dsh-llm'
+import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { apply } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
 import { publicToolName } from '@deepseek-ai/dsh-mcp-client/src/tools.ts'
 import type { Config } from '@deepseek-ai/dsh-mcp-client'
@@ -421,6 +423,7 @@ describe('streamable-http — in-process MCP server', () => {
   let ctx: Context
   let httpServer: Server
   let baseUrl: string
+  let credentialsDir: string
   /** Authorization header values observed by the HTTP server, in arrival order. */
   const seenAuth: Array<string | undefined> = []
 
@@ -431,6 +434,10 @@ describe('streamable-http — in-process MCP server', () => {
    */
   async function handleMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     seenAuth.push(req.headers.authorization)
+    if (!['Bearer first-token', 'Bearer rotated-token'].includes(req.headers.authorization ?? '')) {
+      res.writeHead(401).end('Unauthorized')
+      return
+    }
     const server = new McpServer(
       { name: 'http-fixture', version: '1.0.0' },
       { capabilities: { tools: {} } },
@@ -461,6 +468,11 @@ describe('streamable-http — in-process MCP server', () => {
 
   beforeAll(async () => {
     httpServer = createServer((req, res) => {
+      if (req.url?.startsWith('/redirect?target=')) {
+        const port = req.url.slice('/redirect?target='.length)
+        res.writeHead(307, { location: `http://127.0.0.1:${port}/mcp` }).end()
+        return
+      }
       handleMcpRequest(req, res).catch((error: unknown) => {
         res.writeHead(500).end(String(error))
       })
@@ -473,11 +485,18 @@ describe('streamable-http — in-process MCP server', () => {
     baseUrl = `http://127.0.0.1:${address.port}/mcp`
 
     ctx = await mountRegistry()
+    credentialsDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-credentials-'))
+    await ctx.plugin(LocalCredentialProvider, {
+      path: join(credentialsDir, '.credentials.yaml'),
+      watch: false,
+    })
+    await ctx.credentials.set(credentialRef('MCP_E2E_TOKEN'), 'first-token')
     const config: Config = {
       transport: 'streamable-http',
       serverName: 'web',
       url: baseUrl,
-      headers: { Authorization: 'Bearer e2e-test-token' },
+      headers: {},
+      bearerTokenEnv: 'MCP_E2E_TOKEN',
       toolCallTimeoutMs: 15_000,
       failOnStartupError: false,
     }
@@ -486,6 +505,7 @@ describe('streamable-http — in-process MCP server', () => {
 
   afterAll(async () => {
     if (ctx) await ctx.fiber.dispose()
+    await rm(credentialsDir, { recursive: true, force: true })
     await sleep(200)
     const closed: PromiseWithResolvers<void> = Promise.withResolvers()
     httpServer.close(() => { closed.resolve() })
@@ -508,6 +528,7 @@ describe('streamable-http — in-process MCP server', () => {
   })
 
   it('executes shout({ message }) with args over HTTP', async () => {
+    await ctx.credentials.set(credentialRef('MCP_E2E_TOKEN'), 'rotated-token')
     const result = await ctx.tools.execute({
       signal: testToolSignal,
       callId: nextCallId(), name: 'mcp__web__shout', arguments: { message: 'quiet' },
@@ -516,8 +537,93 @@ describe('streamable-http — in-process MCP server', () => {
     expect(result.content[0]).toEqual({ type: 'text', text: 'QUIET' })
   })
 
-  it('sends configured headers on every HTTP request', () => {
+  it('resolves the Bearer credential for every HTTP request', () => {
     expect(seenAuth.length).toBeGreaterThan(0)
-    for (const auth of seenAuth) expect(auth).toBe('Bearer e2e-test-token')
+    expect(seenAuth).toContain('Bearer first-token')
+    expect(seenAuth).toContain('Bearer rotated-token')
+    for (const auth of seenAuth) {
+      expect(['Bearer first-token', 'Bearer rotated-token']).toContain(auth)
+    }
+  })
+
+  it('fails before network access when the credential is missing', async () => {
+    const isolated = await mountRegistry()
+    const before = seenAuth.length
+    await expect(apply(isolated, {
+      transport: 'streamable-http',
+      serverName: 'missing',
+      url: baseUrl,
+      headers: {},
+      bearerTokenEnv: 'MCP_MISSING_TOKEN',
+      toolCallTimeoutMs: 15_000,
+      failOnStartupError: true,
+      reconnect: { enabled: false },
+    })).rejects.toThrow('initial connection or tool synchronization failed')
+    expect(seenAuth).toHaveLength(before)
+    await isolated.fiber.dispose()
+  })
+
+  it('rejects a wrong Bearer credential at the server', async () => {
+    const isolated = await mountRegistry()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-wrong-credentials-'))
+    await isolated.plugin(LocalCredentialProvider, {
+      path: join(directory, '.credentials.yaml'),
+      watch: false,
+    })
+    await isolated.credentials.set(credentialRef('MCP_WRONG_TOKEN'), 'wrong-token')
+    await expect(apply(isolated, {
+      transport: 'streamable-http',
+      serverName: 'wrong',
+      url: baseUrl,
+      headers: {},
+      bearerTokenEnv: 'MCP_WRONG_TOKEN',
+      toolCallTimeoutMs: 15_000,
+      failOnStartupError: true,
+      reconnect: { enabled: false },
+    })).rejects.toThrow('initial connection or tool synchronization failed')
+    expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
+    await isolated.fiber.dispose()
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  it('rejects redirects without contacting the target', async () => {
+    let targetRequests = 0
+    const target = createServer((_req, res) => {
+      targetRequests += 1
+      res.writeHead(200).end()
+    })
+    const listening: PromiseWithResolvers<void> = Promise.withResolvers()
+    target.listen(0, '127.0.0.1', listening.resolve)
+    await listening.promise
+    const targetAddress = target.address()
+    if (targetAddress === null || typeof targetAddress === 'string') {
+      throw new Error(`expected a TCP AddressInfo, got ${String(targetAddress)}`)
+    }
+    const redirectUrl = `${baseUrl.replace('/mcp', '/redirect')}?target=${targetAddress.port}`
+    const isolated = await mountRegistry()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-redirect-credentials-'))
+    await isolated.plugin(LocalCredentialProvider, {
+      path: join(directory, '.credentials.yaml'),
+      watch: false,
+    })
+    await isolated.credentials.set(credentialRef('MCP_REDIRECT_TOKEN'), 'first-token')
+    await expect(apply(isolated, {
+      transport: 'streamable-http',
+      serverName: 'redirect',
+      url: redirectUrl,
+      headers: {},
+      bearerTokenEnv: 'MCP_REDIRECT_TOKEN',
+      toolCallTimeoutMs: 15_000,
+      failOnStartupError: true,
+      reconnect: { enabled: false },
+    })).rejects.toThrow('initial connection or tool synchronization failed')
+    expect(targetRequests).toBe(0)
+    await isolated.fiber.dispose()
+    await rm(directory, { recursive: true, force: true })
+    const closed: PromiseWithResolvers<void> = Promise.withResolvers()
+    target.close(() => {
+      closed.resolve()
+    })
+    await closed.promise
   })
 })

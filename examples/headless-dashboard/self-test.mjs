@@ -1,174 +1,222 @@
 /**
- * dashboard-provider 自测 —— 不起 LLM，直接验证 provider 的 ask/SSE/answer/timeout/abort 五条路径。
+ * Keyless dashboard-provider lifecycle and HTTP security smoke.
  *
- * 跑法：node examples/headless-dashboard/self-test.mjs
- * 退出码 0 = 全过。
+ * Run with: node examples/headless-dashboard/self-test.mjs
  */
-import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-
 const PORT = 8791;
 const BASE = `http://127.0.0.1:${PORT}`;
-
-// 复用插件的 apply（设小超时便于测 timeout 分支）
-process.env.DASHBOARD_PORT = String(PORT);
-process.env.DASHBOARD_TIMEOUT_MS = '1500'; // 1.5s 便于测超时
-
 const { apply } = await import('./dashboard-provider.mjs');
 
-// ── 假 ctx + userQuestions ────────────────────────────────────────────────
-let registeredProvider = null;
+let provider;
+let dispose;
 const ctx = {
-  userQuestions: { registerProvider: (p) => { registeredProvider = p; return () => {}; } },
-  effect: undefined,
+  userQuestions: {
+    registerProvider(value) {
+      provider = value;
+      return () => {
+        provider = undefined;
+      };
+    },
+  },
+  effect(setup) {
+    dispose = setup();
+    return dispose;
+  },
 };
-apply(ctx);
-if (!registeredProvider) { console.error('FAIL: provider not registered'); process.exit(1); }
-console.log('✓ provider registered');
 
-const ask = registeredProvider.ask;
-
-// ── 工具：收 SSE 事件 ────────────────────────────────────────────────────
-async function openSSE(onEvent) {
-  const req = await fetch(`${BASE}/events`);
-  const reader = req.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '';
-  const pump = async () => {
-    const { done, value } = await reader.read();
-    if (done) return;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-      const lines = chunk.split('\n');
-      let event = 'message', data = '';
-      for (const l of lines) {
-        if (l.startsWith('event: ')) event = l.slice(7);
-        else if (l.startsWith('data: ')) data += l.slice(6);
-      }
-      if (event !== 'message' && event !== '') {
-        try { onEvent(event, JSON.parse(data)); } catch { onEvent(event, data); }
-      }
-    }
-    pump();
-  };
-  pump();
-  return { close: () => reader.cancel() };
-}
-
-// ── 工具：POST JSON ──────────────────────────────────────────────────────
-async function postJSON(path, body) {
-  const r = await fetch(`${BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  return { status: r.status, json: await r.json().catch(() => null) };
-}
-
-// ── 工具：取仪表盘 HTML ──────────────────────────────────────────────────
-async function getDashboard() {
-  const r = await fetch(`${BASE}/`);
-  return { status: r.status, html: await r.text() };
+await apply(ctx, { port: PORT, timeoutMs: 300, autoOpen: false });
+if (provider === undefined || dispose === undefined) {
+  throw new Error('dashboard provider did not register its lifecycle');
 }
 
 const results = [];
-function check(name, cond) { results.push({ name, ok: !!cond }); console.log((cond ? '✓ ' : '✗ ') + name); }
-
-// ── Test 1: 仪表盘 HTML 可取 ──────────────────────────────────────────────
-{
-  const { status, html } = await getDashboard();
-  check('GET / returns dashboard HTML (200, contains <h1>)', status === 200 && html.includes('<h1>'));
+function check(name, condition) {
+  results.push(Boolean(condition));
+  console.log(`${condition ? '✓' : '✗'} ${name}`);
 }
 
-// ── Test 2: /status 空态 ──────────────────────────────────────────────────
-{
-  const r = await fetch(`${BASE}/status`);
-  const j = await r.json();
-  check('GET /status empty (pending=0)', j.ok && j.pending.length === 0);
+const page = await fetch(`${BASE}/`);
+const cookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+check('dashboard document sets an HttpOnly same-site capability', (
+  page.status === 200
+  && page.headers.get('set-cookie')?.includes('HttpOnly')
+  && page.headers.get('set-cookie')?.includes('SameSite=Strict')
+  && typeof cookie === 'string'
+));
+
+function authorizedHeaders(extra = {}) {
+  return {
+    Origin: BASE,
+    Cookie: cookie,
+    ...extra,
+  };
 }
 
-// ── Test 3: ask() → SSE 收题 → POST /answer → resolve ────────────────────
-{
+async function post(path, body, headers = authorizedHeaders()) {
+  const response = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: await response.json(),
+  };
+}
+
+async function openSse() {
+  const response = await fetch(`${BASE}/events`, { headers: authorizedHeaders() });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
   const events = [];
-  const sse = await openSSE((ev, d) => events.push({ ev, d }));
-  const askP = ask({
-    questions: [{ id: 'q1', question: '选哪个数据库?', options: [{ label: 'MySQL' }, { label: 'PostgreSQL' }] }],
-    agent: undefined,
-    signal: undefined,
+  let running = true;
+  const pump = (async () => {
+    while (running) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const eventLine = frame.split('\n').find(line => line.startsWith('event: '));
+        const dataLine = frame.split('\n').find(line => line.startsWith('data: '));
+        if (eventLine !== undefined && dataLine !== undefined) {
+          events.push({
+            event: eventLine.slice(7),
+            data: JSON.parse(dataLine.slice(6)),
+          });
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+  })();
+  return {
+    events,
+    async close() {
+      running = false;
+      await reader.cancel();
+      await pump;
+    },
+  };
+}
+
+async function waitFor(find, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = find();
+    if (value !== undefined) return value;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error('timed out waiting for test event');
+}
+
+try {
+  const forbidden = await fetch(`${BASE}/status`);
+  check('API requests without same-origin capability are forbidden', forbidden.status === 403);
+
+  const crossOrigin = await fetch(`${BASE}/status`, {
+    headers: { Cookie: cookie, Origin: 'https://example.invalid' },
   });
-  // 等 SSE 收到 question
-  let qid = null;
-  await new Promise((res) => {
-    const t = setInterval(() => {
-      const q = events.find(e => e.ev === 'question');
-      if (q) { qid = q.d.id; clearInterval(t); res(); }
-    }, 20);
+  check('cross-origin requests are forbidden', crossOrigin.status === 403);
+
+  const status = await fetch(`${BASE}/status`, { headers: authorizedHeaders() });
+  const statusBody = await status.json();
+  check('authorized status starts empty', status.status === 200 && statusBody.pending === 0);
+
+  await Promise.resolve().then(() => provider.ask({
+    questions: [
+      { id: 'duplicate', question: 'First?' },
+      { id: 'duplicate', question: 'Second?' },
+    ],
+  })).then(
+    () => check('duplicate question ids are rejected', false),
+    () => check('duplicate question ids are rejected', true),
+  );
+
+  const sse = await openSse();
+  const answerPromise = provider.ask({
+    questions: [
+      {
+        id: 'database',
+        question: 'Choose a database',
+        options: [{ label: 'PostgreSQL' }, { label: 'SQLite' }],
+      },
+      { id: 'reason', question: 'Why?' },
+    ],
   });
-  check('SSE received question event with id', !!qid);
-  // 提交答案
-  const ans = await postJSON('/answer', { id: qid, answers: [{ id: 'q1', selected: ['MySQL'] }] });
-  check('POST /answer accepted (200)', ans.status === 200 && ans.json.ok);
-  const answer = await askP;
-  check('ask() resolved with submitted answer', answer.answers[0].selected[0] === 'MySQL');
+  const question = await waitFor(() => sse.events.find(item => item.event === 'question')?.data);
+  check('SSE receives the complete question batch', question.questions.length === 2);
+
+  const missing = await post('/answer', {
+    id: question.id,
+    answers: [{ id: 'database', selected: ['PostgreSQL'] }],
+  });
+  check('partial answer batches are rejected', missing.status === 422);
+
+  const reordered = await post('/answer', {
+    id: question.id,
+    answers: [
+      { id: 'reason', selected: [], custom: 'Local use' },
+      { id: 'database', selected: ['PostgreSQL'] },
+    ],
+  });
+  check('reordered answers are rejected', reordered.status === 422);
+
+  const invalidCustom = await post('/answer', {
+    id: question.id,
+    answers: [
+      { id: 'database', selected: ['PostgreSQL'], custom: 'also custom' },
+      { id: 'reason', selected: [], custom: 'Local use' },
+    ],
+  });
+  check('single-select custom ambiguity is rejected', invalidCustom.status === 422);
+
+  const accepted = await post('/answer', {
+    id: question.id,
+    answers: [
+      { id: 'database', selected: ['PostgreSQL'] },
+      { id: 'reason', selected: [], custom: 'Local use' },
+    ],
+  });
+  const answer = await answerPromise;
+  check('valid ordered answers resolve the provider', (
+    accepted.status === 200
+    && answer.answers[0].selected[0] === 'PostgreSQL'
+    && answer.answers[1].custom === 'Local use'
+  ));
   await sse.close();
-}
 
-// ── Test 4: 校验拦截 —— 错误的 question id / 非法 selected ────────────────
-{
-  const events = [];
-  const sse = await openSSE((ev, d) => events.push({ ev, d }));
-  const askP = ask({
-    questions: [{ id: 'q2', question: '选?', options: [{ label: 'A' }, { label: 'B' }] }],
-    agent: undefined, signal: undefined,
+  const controller = new AbortController();
+  const aborted = provider.ask({
+    questions: [{ id: 'abort', question: 'Abort?' }],
+    signal: controller.signal,
   });
-  let qid = null;
-  await new Promise((res) => { const t = setInterval(() => { const q = events.find(e => e.ev === 'question'); if (q) { qid = q.d.id; clearInterval(t); res(); } }, 20); });
-  // 错 id
-  const bad1 = await postJSON('/answer', { id: qid, answers: [{ id: 'wrong', selected: ['A'] }] });
-  check('reject unknown question id (422)', bad1.status === 422);
-  // 非法选项
-  const bad2 = await postJSON('/answer', { id: qid, answers: [{ id: 'q2', selected: ['ZZZ'] }] });
-  check('reject option not in list (422)', bad2.status === 422);
-  // 单选给多个
-  const bad3 = await postJSON('/answer', { id: qid, answers: [{ id: 'q2', selected: ['A', 'B'] }] });
-  check('reject multi-selected on single-select (422)', bad3.status === 422);
-  // 正确提交
-  const ok = await postJSON('/answer', { id: qid, answers: [{ id: 'q2', selected: ['A'] }] });
-  check('correct answer accepted after rejections', ok.status === 200);
-  await askP;
-  await sse.close();
+  controller.abort();
+  await aborted.then(
+    () => check('caller abort rejects the pending question', false),
+    () => check('caller abort rejects the pending question', true),
+  );
+
+  const timedOut = provider.ask({
+    questions: [{ id: 'timeout', question: 'Timeout?' }],
+  });
+  await timedOut.then(
+    () => check('question timeout rejects the pending question', false),
+    () => check('question timeout rejects the pending question', true),
+  );
+
+  const pendingAtDispose = provider.ask({
+    questions: [{ id: 'dispose', question: 'Dispose?' }],
+  }).then(() => false, () => true);
+  await dispose();
+  check('plugin disposal rejects pending questions', await pendingAtDispose);
+  check('plugin disposal unregisters the provider', provider === undefined);
+} finally {
+  if (provider !== undefined) await dispose();
 }
 
-// ── Test 5: 超时分支（不答题，等 1.5s 自动 reject）────────────────────────
-{
-  const t0 = Date.now();
-  const askP = ask({ questions: [{ id: 'qto', question: '不会有人答' }], agent: undefined, signal: undefined });
-  let timedOut = false;
-  try { await askP; } catch (e) { timedOut = true; }
-  const elapsed = Date.now() - t0;
-  check('ask() rejects on timeout (~1.5s)', timedOut && elapsed > 1400 && elapsed < 3000);
-}
-
-// ── Test 6: abort signal 分支 ─────────────────────────────────────────────
-{
-  const ac = new AbortController();
-  const askP = ask({ questions: [{ id: 'qab', question: '会被取消' }], agent: undefined, signal: ac.signal });
-  setTimeout(() => ac.abort(), 100);
-  let aborted = false;
-  try { await askP; } catch (e) { aborted = true; }
-  check('ask() rejects when signal aborts', aborted);
-}
-
-// ── Test 7: 已 abort 的 signal（进入即拒）─────────────────────────────────
-{
-  const ac = new AbortController();
-  ac.abort();
-  let rejectedImmediate = false;
-  try { await ask({ questions: [{ id: 'qab2', question: 'x' }], agent: undefined, signal: ac.signal }); }
-  catch (e) { rejectedImmediate = true; }
-  check('ask() rejects immediately if signal already aborted', rejectedImmediate);
-}
-
-// ── 汇总 ──────────────────────────────────────────────────────────────────
-const passed = results.filter(r => r.ok).length;
-const total = results.length;
-console.log(`\n=== ${passed}/${total} passed ===`);
-process.exit(passed === total ? 0 : 1);
+const passed = results.filter(Boolean).length;
+console.log(`\n=== ${passed}/${results.length} passed ===`);
+if (passed !== results.length) process.exitCode = 1;

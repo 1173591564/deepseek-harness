@@ -1,68 +1,129 @@
 /**
- * memory-client 自测 —— 调真实 Gateway 验证 7 个方法。
- * 跑法：node examples/headless-dashboard/test-memory-client.mjs
+ * Keyless MemoryCore client smoke with local protocol fixtures.
  */
-import { createMemoryClient, loadUserKey } from './memory-client.mjs';
+import { createServer } from 'node:http';
+import { createMemoryClient } from './memory-client.mjs';
 
-const userKey = loadUserKey();
-console.log('user_key loaded: prefix=' + userKey.slice(0, 15) + '... len=' + userKey.length);
-
-const client = createMemoryClient({ userKey });
 const checks = [];
-const check = (name, cond) => { checks.push({ name, ok: !!cond }); console.log((cond ? '✓ ' : '✗ ') + name); };
-
-// 1. verifyAuth
-const auth = await client.verifyAuth();
-check('verifyAuth returns valid=true with user_id', auth.valid === true && !!auth.user?.user_id);
-console.log('  user_id=' + auth.user?.user_id + ' type=' + auth.user?.user_type);
-
-// 2. listTeams
-const teams = await client.listTeams();
-check('listTeams returns array with >=1 team', Array.isArray(teams) && teams.length >= 1);
-console.log('  teams=' + teams.map(t => t.team_id + ':' + t.name).join(', '));
-
-// 3. listAgents (用第一个 team)
-const teamId = teams[0].team_id;
-const agents = await client.listAgents(teamId);
-check('listAgents returns array with >=1 agent', Array.isArray(agents) && agents.length >= 1);
-console.log('  agents=' + agents.map(a => a.agent_id + ':' + a.name).join(', '));
-
-// 4. listTasks
-const tasks = await client.listTasks(teamId);
-check('listTasks returns array', Array.isArray(tasks));
-console.log('  tasks=' + tasks.map(t => t.task_id + ':' + t.title).join(', '));
-
-// 5. getAgent (第一个 agent)
-const agent = await client.getAgent(agents[0].agent_id);
-check('getAgent returns entity with agent_id', !!agent?.agent_id);
-console.log('  agent.prompt=' + (agent.prompt ? agent.prompt.slice(0, 50) + '...' : '(none)'));
-
-// 6. getTask (如果有 task)
-if (tasks.length > 0) {
-  const task = await client.getTask(tasks[0].task_id);
-  check('getTask returns entity with task_id', !!task?.task_id);
-  console.log('  task.description=' + (task.description ? task.description.slice(0, 50) + '...' : '(none)'));
-} else {
-  check('getTask skipped (no tasks)', true);
+function check(name, condition) {
+  checks.push({ name, ok: Boolean(condition) });
+  console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`);
 }
 
-// 7. appendParticipationLog（不实际写入，只验证签名/连接——用假 id 期望 Gateway 报错而非网络错误）
-try {
-  await client.appendParticipationLog({
-    team_id: 'fake-team',
-    task_id: 'fake-task',
-    agent_id: 'fake-agent',
-    user_id: auth.user.user_id,
-    source: 'native-plugin:test',
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
   });
-  check('appendParticipationLog reached Gateway (no throw)', true);
-} catch (e) {
-  // 预期 Gateway 会因 fake id 报错，但能拿到 Gateway 的错误响应说明连接 OK
-  const reachable = /Gateway.*error/i.test(e.message) || /code=/.test(e.message);
-  check('appendParticipationLog reached Gateway (got structured error)', reachable);
-  console.log('  expected error: ' + e.message.slice(0, 100));
 }
 
-const passed = checks.filter(c => c.ok).length;
+function close(server) {
+  return new Promise(resolve => server.close(resolve));
+}
+
+async function bodyOf(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+let requests = 0;
+const observedKeys = [];
+const gateway = createServer(async (request, response) => {
+  requests += 1;
+  const body = await bodyOf(request);
+  observedKeys.push({
+    header: request.headers['x-tdai-user-key'],
+    body: body.user_key,
+  });
+  const records = {
+    '/v3/meta/auth/verify': { valid: true, user: { user_id: 'user-1' } },
+    '/v3/meta/team/list': { items: [{ team_id: 'team-1', name: 'Team' }] },
+    '/v3/meta/agent/list': { items: [{ agent_id: 'agent-1', name: 'Agent' }] },
+    '/v3/meta/task/list': { items: [{ task_id: 'task-1', title: 'Task' }] },
+    '/v3/meta/agent/get': { agent_id: 'agent-1', name: 'Agent' },
+    '/v3/meta/task/get': { task_id: 'task-1', title: 'Task' },
+    '/v3/meta/participation-log/append': { stored: true },
+  };
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify({ code: 0, data: records[request.url] }));
+});
+
+let redirectTargetRequests = 0;
+const redirectTarget = createServer((_request, response) => {
+  redirectTargetRequests += 1;
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify({ code: 0, data: { valid: true } }));
+});
+const redirectTargetPort = await listen(redirectTarget);
+const redirector = createServer((_request, response) => {
+  response.writeHead(302, {
+    Location: `http://127.0.0.1:${redirectTargetPort}/credential-target`,
+  });
+  response.end();
+});
+
+const gatewayPort = await listen(gateway);
+const redirectPort = await listen(redirector);
+let credential = 'first:special#credential';
+const client = createMemoryClient({
+  endpoint: `http://127.0.0.1:${gatewayPort}`,
+  serviceId: 'fixture',
+  resolveUserKey: async () => credential,
+});
+
+try {
+  check('verifyAuth', (await client.verifyAuth()).valid === true);
+  check('listTeams', (await client.listTeams())[0].team_id === 'team-1');
+  check('listAgents', (await client.listAgents('team-1'))[0].agent_id === 'agent-1');
+  check('listTasks', (await client.listTasks('team-1'))[0].task_id === 'task-1');
+  check('getAgent', (await client.getAgent('agent-1')).agent_id === 'agent-1');
+  check('getTask', (await client.getTask('task-1')).task_id === 'task-1');
+  check('appendParticipationLog', (await client.appendParticipationLog({})).stored === true);
+  check(
+    'special credential stays intact',
+    observedKeys.every(value => value.header === credential && value.body === credential),
+  );
+
+  credential = 'rotated-credential';
+  await client.verifyAuth();
+  check(
+    'credential rotation affects next request',
+    observedKeys.at(-1).header === credential && observedKeys.at(-1).body === credential,
+  );
+
+  const beforeMissing = requests;
+  const missing = createMemoryClient({
+    endpoint: `http://127.0.0.1:${gatewayPort}`,
+    resolveUserKey: async () => undefined,
+  });
+  await missing.verifyAuth().then(
+    () => check('missing credential rejects', false),
+    error => check(
+      'missing credential rejects before network access',
+      error.message === 'memory credential is unavailable' && requests === beforeMissing,
+    ),
+  );
+
+  const redirecting = createMemoryClient({
+    endpoint: `http://127.0.0.1:${redirectPort}`,
+    resolveUserKey: async () => 'redirect-credential',
+  });
+  await redirecting.verifyAuth().then(
+    () => check('redirect rejects', false),
+    () => check('redirect rejects without target contact', redirectTargetRequests === 0),
+  );
+
+  const controller = new AbortController();
+  controller.abort(new Error('caller cancelled'));
+  await client.verifyAuth({ signal: controller.signal }).then(
+    () => check('caller cancellation rejects', false),
+    error => check('caller cancellation is distinct', error.message === 'memory request was cancelled'),
+  );
+} finally {
+  await Promise.all([close(gateway), close(redirector), close(redirectTarget)]);
+}
+
+const passed = checks.filter(result => result.ok).length;
 console.log(`\n=== ${passed}/${checks.length} passed ===`);
-process.exit(passed === checks.length ? 0 : 1);
+process.exitCode = passed === checks.length ? 0 : 1;

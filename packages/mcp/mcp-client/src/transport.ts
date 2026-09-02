@@ -26,9 +26,13 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
  * Create an MCP transport from the resolved plugin config.
  *
  * @param config - Resolved plugin config discriminated on `transport`.
+ * @param resolveBearerToken - Optional resolver called once for each HTTP operation.
  * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
  */
-export function createTransport(config: Config): Transport {
+export function createTransport(
+  config: Config,
+  resolveBearerToken?: () => Promise<string>,
+): Transport {
   switch (config.transport) {
     case 'stdio':
       return new StdioClientTransport({
@@ -37,14 +41,28 @@ export function createTransport(config: Config): Transport {
         env: buildChildEnv(config.env),
         cwd: config.cwd,
       })
-    case 'streamable-http':
+    case 'streamable-http': {
+      const guardedFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+        const headers = new Headers(config.headers)
+        new Headers(init?.headers).forEach((value, name) => {
+          headers.set(name, value)
+        })
+        if (resolveBearerToken !== undefined) {
+          headers.set('authorization', `Bearer ${await resolveBearerToken()}`)
+        }
+        return await fetch(url, { ...init, headers, redirect: 'error' })
+      }
       // The MCP SDK's StreamableHTTPClientTransport has optional callback
       // properties typed without `| undefined` (exactOptionalPropertyTypes
       // mismatch with the Transport interface); the SDK constructed the
       // object, so the cast records only that widening.
       return new StreamableHTTPClientTransport(
         new URL(config.url),
-        { requestInit: { headers: config.headers } },
+        {
+          requestInit: { headers: config.headers, redirect: 'error' },
+          fetch: guardedFetch,
+        },
       ) as Transport
+    }
   }
 }

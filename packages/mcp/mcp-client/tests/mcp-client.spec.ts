@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -492,6 +493,58 @@ describe('tool execution', () => {
     )
   })
 
+  it('does not expose transport error text to the model', async () => {
+    const client = createMockClient([{ name: 'remote', inputSchema: { type: 'object' } }])
+    client.callTool.mockRejectedValue(new Error('request to https://secret.example/token-value failed'))
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('transport-error'), name: 'mcp__srv__remote', arguments: {},
+    })
+
+    expect(result.isError).toBe(true)
+    expect(result.error?.message).toBe('MCP tool "remote" request failed')
+    expect(JSON.stringify(result.content)).not.toContain('secret.example')
+    expect(JSON.stringify(result.content)).not.toContain('token-value')
+  })
+
+  it('reports request timeouts without exposing the remote cause', async () => {
+    const client = createMockClient([{ name: 'slow', inputSchema: { type: 'object' } }])
+    client.callTool.mockRejectedValue(
+      new McpError(ErrorCode.RequestTimeout, 'remote timeout included sensitive response'),
+    )
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('timeout'), name: 'mcp__srv__slow', arguments: {},
+    })
+
+    expect(result.isError).toBe(true)
+    expect(result.error?.message).toBe('MCP tool "slow" timed out')
+    expect(JSON.stringify(result.content)).not.toContain('sensitive response')
+  })
+
+  it('reports caller cancellation separately from timeout', async () => {
+    const controller = new AbortController()
+    const client = createMockClient([{ name: 'cancelled', inputSchema: { type: 'object' } }])
+    client.callTool.mockImplementation(async () => {
+      controller.abort()
+      throw new McpError(ErrorCode.RequestTimeout, 'caller abort reason')
+    })
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+
+    const result = await ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('cancelled'), name: 'mcp__srv__cancelled', arguments: {},
+    })
+
+    expect(result.isError).toBe(true)
+    expect(result.error?.message).toBe('MCP tool "cancelled" was cancelled')
+    expect(JSON.stringify(result.content)).not.toContain('caller abort reason')
+  })
+
   it('handles legacy toolResult shape', async () => {
     const client = createMockClient(
       [{ name: 'legacy', inputSchema: { type: 'object' } }],
@@ -725,7 +778,7 @@ describe('createTransport', () => {
     const config: Config = {
       transport: 'streamable-http',
       serverName: 'srv',
-      url: 'http://localhost:3000/mcp',
+      url: 'http://127.0.0.1:3000/mcp',
       headers: {},
       toolCallTimeoutMs: 60_000,
       failOnStartupError: false,
@@ -740,8 +793,8 @@ describe('createTransport', () => {
     const config: Config = {
       transport: 'streamable-http',
       serverName: 'srv',
-      url: 'http://localhost:3000/mcp',
-      headers: { Authorization: 'Bearer token' },
+      url: 'http://127.0.0.1:3000/mcp',
+      headers: { 'X-Client-Name': 'test' },
       toolCallTimeoutMs: 60_000,
       failOnStartupError: false,
     }

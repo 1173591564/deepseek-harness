@@ -1,0 +1,17 @@
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+
+- id: user-questions
+  name: './mock-user-questions.ts'
+
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+
+- id: memory-native
+  name: '@deepseek-ai/dsh-memory-native'
+  config:
+    memoryEndpoint: !!js "process.env.MEMORY_ENDPOINT"
+    proxyEndpoint: !!js "process.env.PROXY_ENDPOINT"
+    serviceId: service-1
+    userKeyEnv: MEMORY_KEY
+    proxyBearerTokenEnv: PROXY_TOKEN

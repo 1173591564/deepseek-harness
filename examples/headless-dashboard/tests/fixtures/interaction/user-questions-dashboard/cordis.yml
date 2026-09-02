@@ -1,0 +1,9 @@
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+- id: dashboard-provider
+  name: '@deepseek-ai/dsh-user-questions-dashboard'
+  config:
+    port: !!js "Number(process.env.DASHBOARD_PORT)"
+    timeoutMs: 10000
+    autoOpen: false

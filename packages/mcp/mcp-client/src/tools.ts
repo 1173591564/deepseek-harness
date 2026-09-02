@@ -14,12 +14,14 @@
 
 import { createHash } from 'node:crypto'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
+import { ErrorCode, ListToolsResultSchema, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition, ToolExecution } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode, JsonValue } from '@deepseek-ai/dsh-tools'
+
+const REQUEST_TIMEOUT_CODE: number = ErrorCode.RequestTimeout
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -166,7 +168,8 @@ export async function syncTools(
     // registration occupies this server's namespace. Roll back so the model
     // sees either the full generation or none of it — never a partial set.
     for (const dispose of disposers.values()) dispose()
-    ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
+    const kind = error instanceof Error ? error.name : typeof error
+    ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered (${kind})`)
     if (opts.registrationFailure === 'throw') throw error
     return new Map()
   }
@@ -240,7 +243,21 @@ function createExecutor(
     // string/number/null). Fallback to {} lets the MCP server produce a
     // specific "missing required param" error the model can learn from.
     const argsObj = (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>
-    const result = await callToolUncached(client, rawName, argsObj, exec, opts)
+    let result: Record<string, unknown>
+    try {
+      result = await callToolUncached(client, rawName, argsObj, exec, opts)
+    } catch (error) {
+      if (exec.signal.aborted) {
+        throw new Error(`MCP tool "${rawName}" was cancelled`, { cause: error })
+      }
+      if (
+        error instanceof McpError
+        && error.code === REQUEST_TIMEOUT_CODE
+      ) {
+        throw new Error(`MCP tool "${rawName}" timed out`, { cause: error })
+      }
+      throw new Error(`MCP tool "${rawName}" request failed`, { cause: error })
+    }
 
     // The SDK may return a legacy `toolResult` shape; normalize to content array.
     if (!Array.isArray(result.content)) {

@@ -2,11 +2,11 @@
  * setup.mjs — 把 scholar 三层插件挂进 dsh headless profile（幂等、可回滚）。
  *
  * 挂载三个插件（patch 段 >>> scholar <<<，与其它实验段共存互不影响）：
- *   1. mcp-scholar      — dsh-mcp-client: stdio 挂 `python -m scholar_mcp`（55 工具）
+ *   1. mcp-scholar      — dsh-mcp-client: stdio 挂 `python -m scholar_mcp`（16 工具）
  *                         SCHOLAR_HOME 静态绑定知识库；SCHOLAR_WORKSPACE 用 !!js process.cwd()
  *                         每次启动动态绑定当前目录（全局使用、随意挂工作目录的核心机制）
  *   2. scholar-skills   — 隔离 skill-filesystem 实例，customSkillDirs 指向 <SCHOLAR_HOME>/.scholar/skills
- *   3. scholar-native   — 人格 + 文献环境注入插件（本目录 scholar-native.mjs）
+ *   3. scholar-native   — 人格 + 文献环境注入 package
  *
  * 用法：
  *   node examples/scholar/setup.mjs                     # 安装（默认 --mode global）
@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { execFileSync } from 'node:child_process';
 import { dirname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh');
@@ -52,7 +52,6 @@ const MARKER = '# >>> scholar';
 const END_MARKER = '# <<< scholar';
 
 const y = p => String(p).replace(/\\/g, '/');
-const PLUGIN_URL = pathToFileURL(join(HERE, 'scholar-native.mjs')).href;
 const SKILLS_DIR = y(join(scholarHome, '.scholar', 'skills'));
 
 // ── patch 段 ───────────────────────────────────────────────────────────────
@@ -71,7 +70,7 @@ const PATCH_BLOCK = `${MARKER}
         command: "${y(pythonCmd)}"
         args: ['-m', 'scholar_mcp']
 ${mcpEnv.join('\n')}
-        failOnStartupError: false
+        failOnStartupError: true
     - id: scholar-skills
       name: '@deepseek-ai/dsh-skill-filesystem'
       config:
@@ -80,7 +79,7 @@ ${mcpEnv.join('\n')}
         customSkillDirs:
           - "${SKILLS_DIR}"
     - id: scholar-native
-      name: ${PLUGIN_URL}
+      name: '@deepseek-ai/dsh-scholar-native'
       config:
         scholarHome: "${y(scholarHome)}"
 ${END_MARKER}`;
@@ -111,10 +110,7 @@ function preflight() {
   } else {
     problems.push(`skills 目录不存在: ${SKILLS_DIR}（先 scholar init 或确认 --scholar-home）`);
   }
-  // 3. 插件文件
-  if (existsSync(join(HERE, 'scholar-native.mjs'))) console.log(`[preflight] [OK] scholar-native.mjs 就位`);
-  else problems.push(`插件缺失: ${join(HERE, 'scholar-native.mjs')}`);
-  // 4. 知识库 parsed 目录（动态层索引的数据源；MCP 工具层不依赖它）
+  // 3. 知识库 parsed 目录（动态层索引的数据源；MCP 工具层不依赖它）
   const parsed = join(scholarHome, 'output', 'parsed');
   if (existsSync(parsed)) console.log(`[preflight] [OK] parsed 目录: ${readdirSync(parsed).length} 个文件`);
   else console.log(`[preflight] [WARN] parsed 目录不存在（动态层注入将为空，工具层不受影响）: ${parsed}`);

@@ -125,6 +125,18 @@ describe('mcp-client plugin module exports', () => {
     expect(resolved.serverName).toBe('github-prod_1')
   })
 
+  it('Config schema accepts a Bearer credential reference', () => {
+    const resolved = ConfigSchema({
+      transport: 'streamable-http',
+      serverName: 'remote',
+      url: 'https://mcp.example.test/mcp',
+      bearerTokenEnv: 'MCP_REMOTE_TOKEN',
+    } as never)
+    expect(resolved.transport).toBe('streamable-http')
+    if (resolved.transport !== 'streamable-http') throw new Error('expected Streamable HTTP config')
+    expect(resolved.bearerTokenEnv).toBe('MCP_REMOTE_TOKEN')
+  })
+
   it('Config schema materializes reconnect defaults and merges partial overrides', () => {
     const omitted = ConfigSchema({
       transport: 'stdio',
@@ -236,6 +248,63 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
     expect(other.tools.get('mcp__srv__remote')).toBeDefined()
+  })
+
+  it('rejects Bearer credentials over non-loopback HTTP', async () => {
+    await expect(apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'remote',
+      url: 'http://192.0.2.10/mcp',
+      headers: {},
+      bearerTokenEnv: 'MCP_REMOTE_TOKEN',
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })).rejects.toThrow(/requires HTTPS or an HTTP loopback URL/)
+    expect(mockConnect).not.toHaveBeenCalled()
+  })
+
+  it('rejects static sensitive authentication headers', async () => {
+    await expect(apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'remote',
+      url: 'https://mcp.example.test/mcp',
+      headers: { Authorization: 'Bearer literal' },
+      bearerTokenEnv: 'MCP_REMOTE_TOKEN',
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })).rejects.toThrow(/static header "Authorization" is reserved/)
+    expect(mockConnect).not.toHaveBeenCalled()
+  })
+
+  it.each(['Cookie', 'Proxy-Authorization', 'X-Api-Key', 'X-Auth-Token'])(
+    'rejects the static sensitive header %s',
+    async (header) => {
+      await expect(apply(ctx, {
+        transport: 'streamable-http',
+        serverName: 'remote',
+        url: 'https://mcp.example.test/mcp',
+        headers: { [header]: 'literal' },
+        toolCallTimeoutMs: 60_000,
+        failOnStartupError: true,
+      })).rejects.toThrow(new RegExp(`static header "${header}" is reserved`))
+      expect(mockConnect).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['http://localhost:3000/mcp', /requires HTTPS or an HTTP loopback URL/],
+    ['https://user:secret@mcp.example.test/mcp', /must not contain userinfo/],
+    ['https://mcp.example.test/mcp#fragment', /must not contain a fragment/],
+  ])('rejects an unsafe Streamable HTTP URL: %s', async (url, error) => {
+    await expect(apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'remote',
+      url,
+      headers: {},
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })).rejects.toThrow(error)
+    expect(mockConnect).not.toHaveBeenCalled()
   })
 
   it('logs error and registers no tools when connect fails; dispose closes the client', async () => {
@@ -389,8 +458,8 @@ describe('apply (plugin lifecycle)', () => {
     const httpConfig: Config = {
       transport: 'streamable-http',
       serverName: 'web',
-      url: 'http://localhost:3000/mcp',
-      headers: { Authorization: 'Bearer x' },
+      url: 'http://127.0.0.1:3000/mcp',
+      headers: { 'X-Client-Name': 'test' },
       toolCallTimeoutMs: 30_000,
       failOnStartupError: false,
     }

@@ -1,0 +1,8 @@
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+
+- id: scholar-native
+  name: '@deepseek-ai/dsh-scholar-native'
+  config:
+    scholarHome: !!js "`${process.env.DSH_HOME}/scholar`"
+    debug: false
