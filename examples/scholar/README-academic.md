@@ -1,10 +1,10 @@
-# Scholar DSH 学术专用版（v0.2.0）
+# Scholar DSH 学术专用版（v0.2.1）
 
 deepseek-harness（dsh）学术发行版： Scholar Studio 知识库（581 篇论文 / 16k sections / 43k 引用网络）以原生 Cordis 插件方式挂进 dsh，模型无需显式指令即可感知馆藏并自动引用。
 
 ## 内容物
 
-- `scholar_studio-0.2.0-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
+- `scholar_studio-0.2.1-py3-none-any.whl` — 全部后端 + dsh 插件模板 + 学术人格 rules
 - `install.ps1` / `install.sh` — 一键安装（wheel 直装 + `scholar init-dsh`）
 - 本 README
 
@@ -24,8 +24,11 @@ cd deepseek-harness && pnpm install   # 运行方式见上游 README
 # 2) 解压本 Release 的 bundle，安装 scholar 后端 + 挂载
 #    Windows: .\install.ps1    Linux/macOS: bash install.sh
 
-# 3) 用 init-dsh 输出的 profile 启动 dsh
-dsh --profile headless
+# 3) 启动
+dsh --profile headless          # CLI one-shot（headless patch 通道）
+
+#    Web UI：dsh web 启动后，设置 → Agent 预设 → 自定义 →「学术模式」
+#    （init-dsh 会生成用户级学术模式预设：standard 工具集 + scholar 阅读阶梯 + 人格）
 ```
 
 ## 连接团队服务器索引（无本地知识库时）
@@ -58,6 +61,6 @@ SCHOLAR_PG_USER=scholar      SCHOLAR_PG_PASS=<向管理员获取>
 ## 卸载
 
 ```bash
-scholar init-dsh --uninstall   # 移除 cordis.patch.yml 中 scholar 段
+scholar init-dsh --uninstall   # 移除 headless patch 段 + academic 预设目录
 python -m pip uninstall scholar-studio
 ```

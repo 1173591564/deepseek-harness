@@ -1,6 +1,6 @@
 # Scholar DSH 学术专用版
 # 一键安装：wheel 本地直装 + init-dsh 挂载（无需 PyPI）
-param([string]$Wheel = "$PSScriptRoot\scholar_studio-0.2.0-py3-none-any.whl")
+param([string]$Wheel = "$PSScriptRoot\scholar_studio-0.2.1-py3-none-any.whl")
 $ErrorActionPreference = 'Stop'
 Write-Host "[1/2] pip install $Wheel（含依赖，需可访问 PyPI）"
 python -m pip install --upgrade --no-cache-dir $Wheel
