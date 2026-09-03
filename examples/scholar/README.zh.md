@@ -15,10 +15,10 @@ Team authorization、quota、centralized audit 与 tenant corpus isolation 属�
 
 ## 本地开发安装
 
-挂载 example 前先安装 Scholar Studio 0.2.3 并初始化本地资产：
+挂载 example 前先安装 Scholar Studio 0.2.5 并初始化本地资产：
 
 ```sh
-python -m pip install scholar-studio==0.2.3
+python -m pip install scholar-studio==0.2.5
 scholar init
 node examples/scholar/setup.mjs
 ```
@@ -31,10 +31,10 @@ node examples/scholar/setup.mjs uninstall
 
 ## Release 安装
 
-Release bundle 包含 `scholar_studio-0.2.3-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 都会先初始化 15 个本地 skill，再生成引用 credential 的 DSH configuration。默认 endpoint 是供 SSH tunnel 使用的 loopback；公网 endpoint 必须显式提供 HTTPS。
+Release bundle 包含 `scholar_studio-0.2.5-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 都会先初始化 15 个本地 skill，再生成引用 credential 的 DSH configuration。必须显式设置 Proxy Hub endpoint；公网 endpoint 使用 HTTPS，开发环境可以使用数字 loopback 地址。
 
 ```sh
-SCHOLAR_REMOTE_URL=https://scholar.example/mcp bash install.sh
+SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
 Token 以不回显方式读取并通过 stdin 传递。它存入 DSH managed credential，不会写入 YAML 或 process argument。

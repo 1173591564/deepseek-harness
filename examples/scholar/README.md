@@ -15,10 +15,10 @@ Team authorization, quotas, centralized audit, and tenant corpus isolation belon
 
 ## Local development setup
 
-Install Scholar Studio 0.2.3 and initialize its local assets before mounting the example:
+Install Scholar Studio 0.2.5 and initialize its local assets before mounting the example:
 
 ```sh
-python -m pip install scholar-studio==0.2.3
+python -m pip install scholar-studio==0.2.5
 scholar init
 node examples/scholar/setup.mjs
 ```
@@ -31,10 +31,10 @@ node examples/scholar/setup.mjs uninstall
 
 ## Release installation
 
-The release bundle contains `scholar_studio-0.2.3-py3-none-any.whl`, `install.sh`, and `install.ps1`. Both installers initialize the 15 local skills before generating credential-referenced DSH configuration. Their default endpoint is loopback for an SSH tunnel; a public endpoint must be supplied as HTTPS.
+The release bundle contains `scholar_studio-0.2.5-py3-none-any.whl`, `install.sh`, and `install.ps1`. Both installers initialize the 15 local skills before generating credential-referenced DSH configuration. Set the Proxy Hub endpoint explicitly; public endpoints must use HTTPS, while development may use a numeric loopback address.
 
 ```sh
-SCHOLAR_REMOTE_URL=https://scholar.example/mcp bash install.sh
+SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
 The token is read without echo and passed on stdin. It is stored through DSH managed credentials rather than written into YAML or process arguments.

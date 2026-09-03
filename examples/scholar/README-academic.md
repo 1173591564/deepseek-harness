@@ -22,20 +22,22 @@
 
 ```sh
 # Windows
-.\install.ps1
+.\install.ps1 -Gateway https://scholar.example/v1/mcp/scholar
 # Linux/macOS
-bash install.sh
+SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
-安装器提示输入一次性兑换码，然后执行：
+安装器以隐藏输入读取一次性兑换码，再通过标准输入执行：
 
 ```sh
-scholar gateway-login --gateway http://47.108.198.147:8081/v1/mcp/scholar --code <兑换码>
+printf '%s\n' "$ENROLMENT_CODE" | scholar gateway-login \
+  --gateway https://scholar.example/v1/mcp/scholar \
+  --code-stdin
 ```
 
-流程：兑换码 → Proxy Hub `/v1/session` 换取短期 capability（约 30 天）→ capability 存入 DSH owner-only managed credential（配置文件只含 credential reference，不含明文 token）。
+流程：兑换码 → Proxy Hub `/v1/session` 换取短期 capability → capability 存入 DSH owner-only managed credential（配置文件只含 credential reference，不含明文 token）。有效期以 Proxy Hub 返回的 `expires_at` 为准。
 
-**capability 到期后**向管理员索取新兑换码，重跑 `scholar gateway-login --code <新码>` 即可——只需覆盖凭据，配置不动。
+**capability 到期后**向管理员索取新兑换码，重跑 installer 或使用 `--code-stdin` 即可——只需覆盖凭据，配置不动。
 
 Scholar connection 使用 `failOnStartupError: true`。缺失或过期的 capability 会使学术组合启动失败，不会静默降级；此时即为本命令重跑的时机。
 
@@ -66,4 +68,4 @@ scholar init-dsh --uninstall
 python -m pip uninstall scholar-studio
 ```
 
-团队权限（OIDC 登录、租户 RBAC）、tenant tool policy、quota、centralized audit 由 Proxy Hub 管理（`http://47.108.198.147:8081/console/`）。
+团队权限（OIDC 登录、租户 RBAC）、tenant tool policy、quota、centralized audit 由 Proxy Hub 管理。
