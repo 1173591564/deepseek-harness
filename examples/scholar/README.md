@@ -39,6 +39,38 @@ SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 
 The token is read without echo and passed on stdin. It is stored through DSH managed credentials rather than written into YAML or process arguments.
 
+## SSH tunnel without a public domain
+
+An SSH account on the Proxy Hub host can carry the gateway over an encrypted loopback connection without a public HTTPS domain. Start the tunnel in one terminal and leave it running:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:9845:127.0.0.1:8081 \
+  <ssh-user>@<proxy-host>
+```
+
+Verify that the console responds through the tunnel before consuming a one-time enrolment code:
+
+```sh
+curl -I http://127.0.0.1:9845/console/
+```
+
+In a second terminal, run the installer against the loopback gateway:
+
+```powershell
+# Windows PowerShell
+.\install.ps1 -Gateway http://127.0.0.1:9845/v1/mcp/scholar
+```
+
+```sh
+# Linux/macOS
+SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
+```
+
+Give each user a separate SSH account or authorized key so tunnel access can be revoked independently. SSH only supplies the encrypted transport; Proxy Hub membership, tool policy, quota, and the user's capability still authorize every Scholar request.
+
+Keep the tunnel running while DSH uses Scholar. `Ctrl+C` closes it; start the same SSH command again before the next Scholar session. Each client runs its own tunnel, which binds only `127.0.0.1` and does not expose the forwarded gateway to other computers on the client network.
+
 ## Verification
 
 Run the example verification suite:

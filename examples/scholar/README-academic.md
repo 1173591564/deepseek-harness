@@ -41,6 +41,38 @@ printf '%s\n' "$ENROLMENT_CODE" | scholar gateway-login \
 
 Scholar connection 使用 `failOnStartupError: true`。缺失或过期的 capability 会使学术组合启动失败，不会静默降级；此时即为本命令重跑的时机。
 
+## 无域名方案：SSH 隧道
+
+每台客户端只需具备 Proxy Hub 服务器的 SSH 账号。先在一个终端启动隧道并保持运行：
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:9845:127.0.0.1:8081 \
+  <ssh-user>@<proxy-host>
+```
+
+在使用一次性兑换码前验证隧道：
+
+```sh
+curl -I http://127.0.0.1:9845/console/
+```
+
+另开一个终端执行安装：
+
+```powershell
+# Windows PowerShell
+.\install.ps1 -Gateway http://127.0.0.1:9845/v1/mcp/scholar
+```
+
+```sh
+# Linux/macOS
+SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
+```
+
+应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只负责加密传输；Proxy Hub 仍会通过成员关系、工具策略、配额和用户 capability 授权每次 Scholar 请求。
+
+DSH 使用 Scholar 时需保持 SSH 终端运行；`Ctrl+C` 关闭隧道，下次使用前重新启动。每台客户端各自建立隧道，且只监听客户端 `127.0.0.1`，不会向局域网开放转发端口。
+
 ## 本地 stdio 安装
 
 本地数据模式先安装独立 data pack，再运行：

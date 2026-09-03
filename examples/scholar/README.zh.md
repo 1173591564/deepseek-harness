@@ -39,6 +39,38 @@ SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 
 Token 以不回显方式读取并通过 stdin 传递。它存入 DSH managed credential，不会写入 YAML 或 process argument。
 
+## 无公网域名时使用 SSH 隧道
+
+只要拥有 Proxy Hub 服务器的 SSH 账号，即可通过加密的 loopback 连接使用网关，无需公网 HTTPS 域名。在一个终端启动隧道并保持运行：
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:9845:127.0.0.1:8081 \
+  <ssh-user>@<proxy-host>
+```
+
+使用一次性兑换码前，先确认控制台能通过隧道响应：
+
+```sh
+curl -I http://127.0.0.1:9845/console/
+```
+
+在第二个终端中，让 installer 连接 loopback 网关：
+
+```powershell
+# Windows PowerShell
+.\install.ps1 -Gateway http://127.0.0.1:9845/v1/mcp/scholar
+```
+
+```sh
+# Linux/macOS
+SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
+```
+
+应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只提供加密传输；Proxy Hub 仍会通过成员关系、工具策略、配额和用户 capability 对每次 Scholar 请求授权。
+
+DSH 使用 Scholar 时必须保持隧道运行。按 `Ctrl+C` 可关闭；下次使用 Scholar 前重新执行同一条 SSH 命令。每台客户端各自建立隧道，且只绑定 `127.0.0.1`，不会把转发后的网关开放给客户端所在网络的其他电脑。
+
 ## 验证
 
 运行 example 验证套件：
