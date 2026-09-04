@@ -12,6 +12,8 @@ The Scholar experiment combined example-local plugins, optional startup, literal
 
 Phase one uses a direct DSH client-to-Scholar-server topology. `@deepseek-ai/dsh-mcp-client` provides mandatory stdio or Streamable HTTP tools, `@deepseek-ai/dsh-scholar-native` provides owner-scoped literature and citation context, `@deepseek-ai/dsh-user-questions-dashboard` provides loopback interaction, and `@deepseek-ai/dsh-memory-native` initializes externally persisted participation context when enabled. The example tree contains Loader wiring and validation scenarios; reusable behavior belongs to those packages.
 
+Team deployments extend the remote transport through [Proxy Hub Access Keys](2026-09-03-scholar-proxy-hub-access-keys.md); local and direct authenticated Scholar operation retain this composition.
+
 Scholar activation uses `failOnStartupError: true`. Remote authentication names a credential reference and resolves it for every request; static sensitive headers are rejected. HTTP is limited to HTTPS or explicit loopback development endpoints, and redirects are rejected. Release installers require an explicit gateway and pass hidden enrolment input to `gateway-login` over standard input rather than process arguments. The Scholar server owns the remote corpus, embeddings, and vector indexes. Local stdio installations may use a separately installed data pack; the Scholar wheel carries code and fixed local skills rather than corpus data.
 
 Scholar literature state is keyed by the requesting agent. Prompt assembly refreshes from durable user messages before rendering, and citation audits observe successful writes inside the configured Scholar output directory. Memory publishes context only after authentication, persistence, authoritative readback, and Session-log recording succeed. The dashboard binds loopback, validates exact Host and same-origin Origin, and applies one random capability cookie to page, API, and SSE access.
@@ -28,8 +30,8 @@ Package tests cover authentication policy, credential rotation, path containment
 
 **Synchronize skills and vector indexes from the remote server.** Rejected because skills are fixed client assets while corpus and derived retrieval state are server-owned. Mixing those lifecycles makes installation non-reproducible and expands the credentialed data surface.
 
-**Add a team Proxy Hub in phase one.** Rejected because tenant authorization, team policy, quotas, centralized audit, and corpus isolation require a separate service and deployment model. Direct authenticated operation establishes the smaller end-to-end product first.
+**Make Proxy Hub part of the base composition.** Rejected because local and direct authenticated Scholar operation do not require the separate team service and deployment model. Team deployments add Proxy Hub at the remote transport.
 
 ## Consequences
 
-Phase-one availability depends on the selected Scholar transport and, when enabled, the configured Memory services. Failures are explicit rather than replaced with local shadow state. Remote clients do not need corpus, database, embedding, or vector-index credentials. Team deployment controls remain deferred to a Proxy Hub and are not implied by the direct-client security policy.
+Phase-one availability depends on the selected Scholar transport and, when enabled, the configured Memory services. Failures are explicit rather than replaced with local shadow state. Remote clients do not need corpus, database, embedding, or vector-index credentials. Direct-client security policy does not imply Proxy Hub team controls; deployments select that extension explicitly.

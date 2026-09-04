@@ -7,11 +7,9 @@ This example composes Scholar Studio with DSH through published Cordis packages.
 ## Topology
 
 - Local mode starts `python -m scholar_mcp` over stdio and may read an independently installed local corpus data pack.
-- Remote mode connects directly to a Scholar Streamable HTTP endpoint. The server owns the central corpus, embeddings, and vector indexes.
+- Remote mode connects to Scholar through Proxy Hub. The server owns the central corpus, embeddings, and vector indexes; Proxy Hub enforces user, tenant, tool, quota, routing, and audit policy.
 - Fifteen fixed Scholar skills remain client assets in both modes.
 - Scholar connection and tool synchronization are mandatory; the academic composition uses `failOnStartupError: true`.
-
-Team authorization, quotas, centralized audit, and tenant corpus isolation belong to a later Proxy Hub rather than this direct-client composition.
 
 ## Local development setup
 
@@ -37,7 +35,17 @@ The release bundle contains `scholar_studio-0.2.5-py3-none-any.whl`, `install.sh
 SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
-The token is read without echo and passed on stdin. It is stored through DSH managed credentials rather than written into YAML or process arguments.
+The installer reads the administrator-issued `sk_scholar_v1_...` Access Key without echo and passes it on stdin. DSH stores it as a managed credential rather than writing it into YAML or process arguments. The administrator controls each key's tools, request quota, expiry, rotation, and revocation in Proxy Hub.
+
+Run the login command directly when Scholar Studio is already installed:
+
+```sh
+printf '%s\n' "$SCHOLAR_ACCESS_KEY" | scholar gateway-login \
+  --gateway https://scholar.example/v1/mcp/scholar \
+  --api-key-stdin
+```
+
+`--code` and `--code-stdin` remain available for deployments that still issue one-time enrolment codes and short-lived capabilities.
 
 ## SSH tunnel without a public domain
 
@@ -49,7 +57,7 @@ ssh -N -o ExitOnForwardFailure=yes \
   <ssh-user>@<proxy-host>
 ```
 
-Verify that the console responds through the tunnel before consuming a one-time enrolment code:
+Verify that the console responds through the tunnel:
 
 ```sh
 curl -I http://127.0.0.1:9845/console/
@@ -67,7 +75,7 @@ In a second terminal, run the installer against the loopback gateway:
 SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
 ```
 
-Give each user a separate SSH account or authorized key so tunnel access can be revoked independently. SSH only supplies the encrypted transport; Proxy Hub membership, tool policy, quota, and the user's capability still authorize every Scholar request.
+Give each user a separate SSH account or authorized key so tunnel access can be revoked independently. SSH only supplies the encrypted transport; Proxy Hub validates the user's Access Key and applies its tenant, tool, quota, expiry, and revocation policy to every Scholar request.
 
 Keep the tunnel running while DSH uses Scholar. `Ctrl+C` closes it; start the same SSH command again before the next Scholar session. Each client runs its own tunnel, which binds only `127.0.0.1` and does not expose the forwarded gateway to other computers on the client network.
 

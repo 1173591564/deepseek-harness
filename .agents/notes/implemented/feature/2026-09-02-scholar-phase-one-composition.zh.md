@@ -12,6 +12,8 @@ Scholar 实验混合了 example-local plugin、可选启动、literal HTTP authe
 
 第一阶段采用 DSH client 直连 Scholar server 的拓扑。`@deepseek-ai/dsh-mcp-client` 提供 mandatory stdio 或 Streamable HTTP 工具，`@deepseek-ai/dsh-scholar-native` 提供按 owner 隔离的文献与引用上下文，`@deepseek-ai/dsh-user-questions-dashboard` 提供 loopback 交互，`@deepseek-ai/dsh-memory-native` 在启用时初始化外部持久化 participation context。Example tree 只保存 Loader wiring 与验证场景；可复用行为归这些 package 所有。
 
+团队部署通过 [Proxy Hub Access Key](2026-09-03-scholar-proxy-hub-access-keys.md)扩展 remote transport；本地和直连认证的 Scholar 运行继续使用该组合。
+
 Scholar activation 使用 `failOnStartupError: true`。Remote authentication 指向 credential reference，并为每个请求重新解析；静态敏感标头会被拒绝。HTTP 仅限 HTTPS 或显式 loopback 开发 endpoint，并拒绝 redirect。Release installer 要求显式 gateway，并通过标准输入把隐藏输入的 enrolment code 传给 `gateway-login`，不放入进程参数。Scholar server 拥有 remote corpus、embedding 与 vector index。本地 stdio 安装可以使用单独安装的 data pack；Scholar wheel 携带代码与固定本地 skills，不携带 corpus data。
 
 Scholar 文献状态按发起请求的 agent 建立索引。Prompt assembly 在渲染前从持久化 user message 刷新；citation audit 只观察配置 Scholar output 目录内的成功写入。Memory 仅在 authentication、persistence、authoritative readback 与 Session log 记录均成功后发布上下文。Dashboard 绑定 loopback、校验精确 Host 与 same-origin Origin，并对 page、API 和 SSE 使用同一个随机 capability cookie。
@@ -28,8 +30,8 @@ Package tests 覆盖 authentication policy、credential rotation、path containm
 
 **从 remote server 同步 skills 与 vector index。** 拒绝，因为 skills 是固定 client asset，而 corpus 与派生 retrieval state 归 server 所有。混合这些 lifecycle 会使安装不可复现，并扩大 credentialed data surface。
 
-**在第一阶段加入团队 Proxy Hub。** 拒绝，因为 tenant authorization、team policy、quota、centralized audit 与 corpus isolation 需要独立 service 和 deployment model。Direct authenticated operation 先建立更小的端到端产品。
+**把 Proxy Hub 纳入基础组合。** 拒绝，因为本地和直连认证的 Scholar 运行不需要独立的团队 service 与 deployment model。团队部署在 remote transport 上增加 Proxy Hub。
 
 ## Consequences
 
-第一阶段 availability 依赖所选 Scholar transport；启用 Memory 时还依赖配置的 Memory service。Failure 会显式暴露，而不会被本地 shadow state 替代。Remote client 不需要 corpus、database、embedding 或 vector-index credential。Team deployment control 延期到 Proxy Hub，direct-client security policy 不隐含这些能力。
+第一阶段 availability 依赖所选 Scholar transport；启用 Memory 时还依赖配置的 Memory service。Failure 会显式暴露，而不会被本地 shadow state 替代。Remote client 不需要 corpus、database、embedding 或 vector-index credential。Direct-client security policy 不隐含 Proxy Hub 团队控制；部署必须显式选择该扩展。

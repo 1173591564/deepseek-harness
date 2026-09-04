@@ -64,7 +64,7 @@ describe('scholar example keyless Loader smoke', () => {
 })
 
 describe('scholar release installers', () => {
-  it.skipIf(process.platform === 'win32')('passes enrolment input on stdin', async () => {
+  it.skipIf(process.platform === 'win32')('passes Access Key input on stdin', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'scholar-installer-'))
     const bin = join(workdir, 'bin')
     const argsPath = join(workdir, 'args')
@@ -78,7 +78,7 @@ describe('scholar release installers', () => {
       'printf "%s" "$token" > "$CAPTURE_STDIN"',
     ].join('\n') + '\n', { mode: 0o755 })
 
-    const token = 'enrolment-code-not-in-argv'
+    const token = 'sk_scholar_v1_not-in-argv'
     const gateway = 'https://hub.example.test/v1/mcp/scholar'
     await execFileAsync('bash', [join(root, 'examples/scholar/install.sh')], {
       env: {
@@ -86,7 +86,7 @@ describe('scholar release installers', () => {
         PATH: `${bin}:${process.env.PATH ?? ''}`,
         CAPTURE_ARGS: argsPath,
         CAPTURE_STDIN: stdinPath,
-        SCHOLAR_ENROLMENT_CODE: token,
+        SCHOLAR_ACCESS_KEY: token,
         SCHOLAR_GATEWAY_URL: gateway,
       },
     })
@@ -95,17 +95,17 @@ describe('scholar release installers', () => {
       'gateway-login',
       '--gateway',
       gateway,
-      '--code-stdin',
+      '--api-key-stdin',
     ])
     expect(await readFile(stdinPath, 'utf8')).toBe(token)
     expect(await readFile(argsPath, 'utf8')).not.toContain(token)
   })
 
-  it('keeps the PowerShell enrolment code out of process arguments', async () => {
+  it('keeps the PowerShell Access Key out of process arguments', async () => {
     const script = await readFile(join(root, 'examples/scholar/install.ps1'), 'utf8')
     expect(script).toContain('-AsSecureString')
-    expect(script).toContain('--code-stdin')
-    expect(script).not.toMatch(/--code(?:\s|$)/)
+    expect(script).toContain('--api-key-stdin')
+    expect(script).not.toMatch(/--api-key(?:\s|$)/)
   })
 })
 

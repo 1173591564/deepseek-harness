@@ -7,11 +7,9 @@
 ## 拓扑
 
 - Local 模式通过 stdio 启动 `python -m scholar_mcp`，并可读取独立安装的本地 corpus data pack。
-- Remote 模式直连 Scholar Streamable HTTP endpoint。Server 拥有 central corpus、embedding 与 vector index。
+- Remote 模式通过 Proxy Hub 连接 Scholar。Server 拥有 central corpus、embedding 与 vector index；Proxy Hub 执行用户、租户、工具、配额、路由和审计策略。
 - 两种模式都将 15 个固定 Scholar skill 保留为 client asset。
 - Scholar connection 与 tool synchronization 是 mandatory；academic composition 使用 `failOnStartupError: true`。
-
-Team authorization、quota、centralized audit 与 tenant corpus isolation 属于后续 Proxy Hub，不属于 direct-client composition。
 
 ## 本地开发安装
 
@@ -37,7 +35,17 @@ Release bundle 包含 `scholar_studio-0.2.5-py3-none-any.whl`、`install.sh` 与
 SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
-Token 以不回显方式读取并通过 stdin 传递。它存入 DSH managed credential，不会写入 YAML 或 process argument。
+Installer 以不回显方式读取管理员签发的 `sk_scholar_v1_...` Access Key，并通过 stdin 传递。DSH 将其存入 managed credential，不会写入 YAML 或 process argument。管理员在 Proxy Hub 中控制每个 Key 的工具、请求配额、有效期、轮换和撤销状态。
+
+Scholar Studio 已安装时可直接执行登录命令：
+
+```sh
+printf '%s\n' "$SCHOLAR_ACCESS_KEY" | scholar gateway-login \
+  --gateway https://scholar.example/v1/mcp/scholar \
+  --api-key-stdin
+```
+
+仍签发一次性兑换码和短期 capability 的部署可继续使用 `--code` 与 `--code-stdin`。
 
 ## 无公网域名时使用 SSH 隧道
 
@@ -49,7 +57,7 @@ ssh -N -o ExitOnForwardFailure=yes \
   <ssh-user>@<proxy-host>
 ```
 
-使用一次性兑换码前，先确认控制台能通过隧道响应：
+先确认控制台能通过隧道响应：
 
 ```sh
 curl -I http://127.0.0.1:9845/console/
@@ -67,7 +75,7 @@ curl -I http://127.0.0.1:9845/console/
 SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
 ```
 
-应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只提供加密传输；Proxy Hub 仍会通过成员关系、工具策略、配额和用户 capability 对每次 Scholar 请求授权。
+应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只提供加密传输；Proxy Hub 会校验用户 Access Key，并对每次 Scholar 请求执行租户、工具、配额、有效期和撤销策略。
 
 DSH 使用 Scholar 时必须保持隧道运行。按 `Ctrl+C` 可关闭；下次使用 Scholar 前重新执行同一条 SSH 命令。每台客户端各自建立隧道，且只绑定 `127.0.0.1`，不会把转发后的网关开放给客户端所在网络的其他电脑。
 

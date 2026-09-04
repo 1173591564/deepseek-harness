@@ -16,7 +16,7 @@
 - Python 3.10 或更高版本。
 - 包含 `@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-scholar-native` 与 `@deepseek-ai/dsh-skill-filesystem` 的 DSH checkout。
 - DeepSeek API key。
-- **管理员发放的一次性兑换码（enrolment code）**。
+- **管理员签发的 Scholar Access Key（`sk_scholar_v1_...`）**。
 
 ## 网关安装（默认，Proxy Hub 模式）
 
@@ -27,19 +27,19 @@
 SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
 ```
 
-安装器以隐藏输入读取一次性兑换码，再通过标准输入执行：
+安装器以隐藏输入读取 Access Key，再通过标准输入执行：
 
 ```sh
-printf '%s\n' "$ENROLMENT_CODE" | scholar gateway-login \
+printf '%s\n' "$SCHOLAR_ACCESS_KEY" | scholar gateway-login \
   --gateway https://scholar.example/v1/mcp/scholar \
-  --code-stdin
+  --api-key-stdin
 ```
 
-流程：兑换码 → Proxy Hub `/v1/session` 换取短期 capability → capability 存入 DSH owner-only managed credential（配置文件只含 credential reference，不含明文 token）。有效期以 Proxy Hub 返回的 `expires_at` 为准。
+Access Key 存入 DSH owner-only managed credential；配置文件只含 credential reference，不含明文 Key。Proxy Hub 管理员控制每个 Key 的工具权限、请求配额、有效期、轮换和撤销。
 
-**capability 到期后**向管理员索取新兑换码，重跑 installer 或使用 `--code-stdin` 即可——只需覆盖凭据，配置不动。
+管理员轮换 Key 后，重新运行 installer 或使用 `--api-key-stdin` 覆盖凭据即可，配置无需修改。`--code` 与 `--code-stdin` 保留用于旧 enrolment/capability 部署。
 
-Scholar connection 使用 `failOnStartupError: true`。缺失或过期的 capability 会使学术组合启动失败，不会静默降级；此时即为本命令重跑的时机。
+Scholar connection 使用 `failOnStartupError: true`。缺失、过期或已撤销的 Access Key 会使学术组合启动失败，不会静默降级。
 
 ## 无域名方案：SSH 隧道
 
@@ -51,7 +51,7 @@ ssh -N -o ExitOnForwardFailure=yes \
   <ssh-user>@<proxy-host>
 ```
 
-在使用一次性兑换码前验证隧道：
+验证隧道：
 
 ```sh
 curl -I http://127.0.0.1:9845/console/
@@ -69,7 +69,7 @@ curl -I http://127.0.0.1:9845/console/
 SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
 ```
 
-应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只负责加密传输；Proxy Hub 仍会通过成员关系、工具策略、配额和用户 capability 授权每次 Scholar 请求。
+应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只负责加密传输；Proxy Hub 会校验 Access Key，并执行用户、租户、工具、配额、有效期和撤销策略。
 
 DSH 使用 Scholar 时需保持 SSH 终端运行；`Ctrl+C` 关闭隧道，下次使用前重新启动。每台客户端各自建立隧道，且只监听客户端 `127.0.0.1`，不会向局域网开放转发端口。
 
