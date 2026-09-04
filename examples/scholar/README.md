@@ -13,10 +13,10 @@ This example composes Scholar Studio with DSH through published Cordis packages.
 
 ## Local development setup
 
-Install Scholar Studio 0.2.5 and initialize its local assets before mounting the example:
+Install Scholar Studio 0.2.6 and initialize its local assets before mounting the example:
 
 ```sh
-python -m pip install scholar-studio==0.2.5
+python -m pip install scholar-studio==0.2.6
 scholar init
 node examples/scholar/setup.mjs
 ```
@@ -29,55 +29,17 @@ node examples/scholar/setup.mjs uninstall
 
 ## Release installation
 
-The release bundle contains `scholar_studio-0.2.5-py3-none-any.whl`, `install.sh`, and `install.ps1`. Both installers initialize the 15 local skills before generating credential-referenced DSH configuration. Set the Proxy Hub endpoint explicitly; public endpoints must use HTTPS, while development may use a numeric loopback address.
+The release bundle contains `scholar_studio-0.2.6-py3-none-any.whl`, `install.sh`, and `install.ps1`. Both installers initialize the 15 local skills and the academic preset without storing a Token.
 
 ```sh
-SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
+bash install.sh
 ```
 
-The installer reads the administrator-issued `sk_scholar_v1_...` Access Key without echo and passes it on stdin. DSH stores it as a managed credential rather than writing it into YAML or process arguments. The administrator controls each key's tools, request quota, expiry, rotation, and revocation in Proxy Hub.
+Run `dsh web` and select the academic preset. The onboarding step asks only for the administrator-issued Scholar Token, validates it through Proxy Hub `/v1/me`, and stores it as an owner-only Managed Credential after validation succeeds. Later sessions reuse the credential.
 
-Run the login command directly when Scholar Studio is already installed:
+Explicit `401` and `403` responses require a replacement Token. Network failures, timeouts, and `5xx` responses retain an existing Managed Credential.
 
-```sh
-printf '%s\n' "$SCHOLAR_ACCESS_KEY" | scholar gateway-login \
-  --gateway https://scholar.example/v1/mcp/scholar \
-  --api-key-stdin
-```
-
-`--code` and `--code-stdin` remain available for deployments that still issue one-time enrolment codes and short-lived capabilities.
-
-## SSH tunnel without a public domain
-
-An SSH account on the Proxy Hub host can carry the gateway over an encrypted loopback connection without a public HTTPS domain. Start the tunnel in one terminal and leave it running:
-
-```sh
-ssh -N -o ExitOnForwardFailure=yes \
-  -L 127.0.0.1:9845:127.0.0.1:8081 \
-  <ssh-user>@<proxy-host>
-```
-
-Verify that the console responds through the tunnel:
-
-```sh
-curl -I http://127.0.0.1:9845/console/
-```
-
-In a second terminal, run the installer against the loopback gateway:
-
-```powershell
-# Windows PowerShell
-.\install.ps1 -Gateway http://127.0.0.1:9845/v1/mcp/scholar
-```
-
-```sh
-# Linux/macOS
-SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
-```
-
-Give each user a separate SSH account or authorized key so tunnel access can be revoked independently. SSH only supplies the encrypted transport; Proxy Hub validates the user's Access Key and applies its tenant, tool, quota, expiry, and revocation policy to every Scholar request.
-
-Keep the tunnel running while DSH uses Scholar. `Ctrl+C` closes it; start the same SSH command again before the next Scholar session. Each client runs its own tunnel, which binds only `127.0.0.1` and does not expose the forwarded gateway to other computers on the client network.
+This development release uses the fixed `http://47.108.198.147:8081/v1/mcp/scholar` endpoint and displays a plaintext-transmission warning. Use only revocable test Tokens. A production release must use a fixed HTTPS endpoint.
 
 ## Verification
 

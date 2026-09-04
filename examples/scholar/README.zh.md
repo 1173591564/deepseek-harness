@@ -13,10 +13,10 @@
 
 ## 本地开发安装
 
-挂载 example 前先安装 Scholar Studio 0.2.5 并初始化本地资产：
+挂载 example 前先安装 Scholar Studio 0.2.6 并初始化本地资产：
 
 ```sh
-python -m pip install scholar-studio==0.2.5
+python -m pip install scholar-studio==0.2.6
 scholar init
 node examples/scholar/setup.mjs
 ```
@@ -29,55 +29,17 @@ node examples/scholar/setup.mjs uninstall
 
 ## Release 安装
 
-Release bundle 包含 `scholar_studio-0.2.5-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 都会先初始化 15 个本地 skill，再生成引用 credential 的 DSH configuration。必须显式设置 Proxy Hub endpoint；公网 endpoint 使用 HTTPS，开发环境可以使用数字 loopback 地址。
+Release bundle 包含 `scholar_studio-0.2.6-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 会初始化 15 个本地 skill 和 academic preset，但不保存 Token。
 
 ```sh
-SCHOLAR_GATEWAY_URL=https://scholar.example/v1/mcp/scholar bash install.sh
+bash install.sh
 ```
 
-Installer 以不回显方式读取管理员签发的 `sk_scholar_v1_...` Access Key，并通过 stdin 传递。DSH 将其存入 managed credential，不会写入 YAML 或 process argument。管理员在 Proxy Hub 中控制每个 Key 的工具、请求配额、有效期、轮换和撤销状态。
+运行 `dsh web` 并选择 academic preset。Onboarding step 只要求管理员签发的 Scholar Token，通过 Proxy Hub `/v1/me` 验证成功后才写入 owner-only Managed Credential；后续 session 自动复用该 credential。
 
-Scholar Studio 已安装时可直接执行登录命令：
+明确的 `401` 与 `403` 要求替换 Token。Network failure、timeout 和 `5xx` response 会保留已有 Managed Credential。
 
-```sh
-printf '%s\n' "$SCHOLAR_ACCESS_KEY" | scholar gateway-login \
-  --gateway https://scholar.example/v1/mcp/scholar \
-  --api-key-stdin
-```
-
-仍签发一次性兑换码和短期 capability 的部署可继续使用 `--code` 与 `--code-stdin`。
-
-## 无公网域名时使用 SSH 隧道
-
-只要拥有 Proxy Hub 服务器的 SSH 账号，即可通过加密的 loopback 连接使用网关，无需公网 HTTPS 域名。在一个终端启动隧道并保持运行：
-
-```sh
-ssh -N -o ExitOnForwardFailure=yes \
-  -L 127.0.0.1:9845:127.0.0.1:8081 \
-  <ssh-user>@<proxy-host>
-```
-
-先确认控制台能通过隧道响应：
-
-```sh
-curl -I http://127.0.0.1:9845/console/
-```
-
-在第二个终端中，让 installer 连接 loopback 网关：
-
-```powershell
-# Windows PowerShell
-.\install.ps1 -Gateway http://127.0.0.1:9845/v1/mcp/scholar
-```
-
-```sh
-# Linux/macOS
-SCHOLAR_GATEWAY_URL=http://127.0.0.1:9845/v1/mcp/scholar bash install.sh
-```
-
-应为每位用户配置独立 SSH 账号或 authorized key，以便单独撤销隧道权限。SSH 只提供加密传输；Proxy Hub 会校验用户 Access Key，并对每次 Scholar 请求执行租户、工具、配额、有效期和撤销策略。
-
-DSH 使用 Scholar 时必须保持隧道运行。按 `Ctrl+C` 可关闭；下次使用 Scholar 前重新执行同一条 SSH 命令。每台客户端各自建立隧道，且只绑定 `127.0.0.1`，不会把转发后的网关开放给客户端所在网络的其他电脑。
+该开发版本固定使用 `http://47.108.198.147:8081/v1/mcp/scholar` endpoint，并显示明文传输警告。只能使用可撤销的测试 Token；production release 必须使用固定 HTTPS endpoint。
 
 ## 验证
 
