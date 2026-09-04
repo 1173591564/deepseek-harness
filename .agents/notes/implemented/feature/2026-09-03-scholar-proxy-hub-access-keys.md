@@ -14,6 +14,8 @@ Proxy Hub administrators issue a separate `sk_scholar_v1_...` Access Key for eac
 
 The Scholar installer reads the Access Key without echo and sends it to `scholar gateway-login --api-key-stdin`. The command validates the versioned prefix, stores the key in DSH managed credentials, and writes only the credential reference into the Scholar composition. It does not call the enrolment session endpoint. `--code` and `--code-stdin` retain the one-time enrolment and short-lived capability path during migration.
 
+The [single-lab Token workflow](2026-09-04-scholar-single-lab-token-onboarding.md) is the default workflow for one-Corpus deployments. This Access Key workflow remains available for deployments that require individual policy, quota, or expiry configuration.
+
 SSH port forwarding may expose a loopback HTTP gateway when a lab has no public TLS endpoint. The tunnel supplies encrypted transport and server network admission; Proxy Hub still owns identity, tenant, tool, quota, expiry, revocation, routing, and audit decisions.
 
 ## Verification

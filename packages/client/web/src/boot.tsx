@@ -186,20 +186,24 @@ export class AppWebEntry {
     // its wrapper apply reads the kernel slot and provides ctx.modules (the
     // provide lives on the plugin face; see MODULES_ID for why the row loop
     // must then skip it).
-    const rows = [MODULES_ID, ...this.manifest.plugins.map(row => row.id).filter(id => id !== MODULES_ID), APP_SHELL_ID]
+    const rows = [
+      { id: MODULES_ID, config: {} },
+      ...this.manifest.plugins.filter(row => row.id !== MODULES_ID),
+      { id: APP_SHELL_ID, config: {} },
+    ]
     // Entry creation order carries no semantics (fiber inject waiting owns
     // activation order); creating concurrently lets non-prefetched bundle
     // loads parallelize. The app-shell assembly entry is appended by the
     // kernel: it is shell-own code (host graph rows are all plugin bundles),
     // and mounting the assembly is not a composition decision — it rides the
     // same entry lifecycle so the sweep and status cover it uniformly.
-    await Promise.all(rows.map(async (name) => {
-      this.status.set(name, 'loading')
-      const id = await loader.create({ name })
+    await Promise.all(rows.map(async (row) => {
+      this.status.set(row.id, 'loading')
+      const id = await loader.create({ name: row.id, config: row.config })
       // A failed import leaves the entry fiberless (Entry._init logs and
       // returns); project it as failed — no fiber means no status event.
       if (loader.resolve(id).fiber === undefined) {
-        this.status.set(name, 'failed')
+        this.status.set(row.id, 'failed')
       }
     }))
 

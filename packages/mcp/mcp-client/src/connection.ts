@@ -124,6 +124,7 @@ function errorKind(error: unknown): string {
  * @param config - Resolved plugin config selecting the transport and server identity.
  * @param policy - Resolved reconnect policy from {@link resolveReconnectPolicy}.
  * @param resolveBearerToken - Optional per-request Bearer credential resolver.
+ * @param onAuthenticationRejected - Optional handler for explicit HTTP authentication rejection.
  * @returns Handle with a `ready` promise for startup-await and a `dispose` for teardown.
  */
 export function startConnection(
@@ -131,6 +132,7 @@ export function startConnection(
   config: Config,
   policy: ResolvedReconnectPolicy,
   resolveBearerToken?: () => Promise<string>,
+  onAuthenticationRejected?: () => Promise<void>,
 ): ConnectionHandle {
   const label = `mcp-client(${config.serverName})`
   const opts: ToolBridgeOptions = {
@@ -280,7 +282,7 @@ export function startConnection(
       },
     )
     try {
-      await generation.connect(createTransport(config, resolveBearerToken))
+      await generation.connect(createTransport(config, resolveBearerToken, onAuthenticationRejected))
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)

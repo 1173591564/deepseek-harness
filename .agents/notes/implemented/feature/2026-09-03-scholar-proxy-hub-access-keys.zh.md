@@ -14,6 +14,8 @@ Proxy Hub 管理员为每位研究用户或设备签发独立的 `sk_scholar_v1_
 
 Scholar installer 以不回显方式读取 Access Key，并通过 `scholar gateway-login --api-key-stdin` 传递。该命令校验版本化前缀，将 Key 存入 DSH managed credential，并只把 credential reference 写入 Scholar composition；它不会调用 enrolment session endpoint。`--code` 与 `--code-stdin` 在迁移期间保留一次性 enrolment 和短期 capability 流程。
 
+[单实验室 Token 流程](2026-09-04-scholar-single-lab-token-onboarding.md)是单 Corpus deployment 的默认流程。需要独立 policy、quota 或有效期配置的 deployment 继续使用本 Access Key 流程。
+
 实验室没有公网 TLS endpoint 时，可以通过 SSH port forwarding 提供 loopback HTTP gateway。隧道负责加密传输和服务器网络准入；Proxy Hub 仍负责身份、租户、工具、配额、有效期、撤销、路由和审计决策。
 
 ## Verification

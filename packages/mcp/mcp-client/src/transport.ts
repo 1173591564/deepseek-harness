@@ -27,11 +27,13 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
  *
  * @param config - Resolved plugin config discriminated on `transport`.
  * @param resolveBearerToken - Optional resolver called once for each HTTP operation.
+ * @param onAuthenticationRejected - Optional handler for explicit HTTP authentication rejection.
  * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
  */
 export function createTransport(
   config: Config,
   resolveBearerToken?: () => Promise<string>,
+  onAuthenticationRejected?: () => Promise<void>,
 ): Transport {
   switch (config.transport) {
     case 'stdio':
@@ -50,7 +52,14 @@ export function createTransport(
         if (resolveBearerToken !== undefined) {
           headers.set('authorization', `Bearer ${await resolveBearerToken()}`)
         }
-        return await fetch(url, { ...init, headers, redirect: 'error' })
+        const response = await fetch(url, { ...init, headers, redirect: 'error' })
+        if (
+          onAuthenticationRejected !== undefined
+          && (response.status === 401 || response.status === 403)
+        ) {
+          await onAuthenticationRejected()
+        }
+        return response
       }
       // The MCP SDK's StreamableHTTPClientTransport has optional callback
       // properties typed without `| undefined` (exactOptionalPropertyTypes

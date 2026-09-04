@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ClientModuleSystem,
+  ClientModuleSystem, parseBootManifest,
   type BootModuleRow, type ClientModuleLoader, type ClientPluginHandoff, type DshWindow,
 } from '../src/client/index.ts'
 
@@ -220,6 +220,35 @@ describe('failure modes', () => {
     bench([])
     expect(() => new ClientModuleSystem({ modules: [], staticModules: {} }))
       .toThrow('already installed (double boot?)')
+  })
+})
+
+describe('boot manifest parsing', () => {
+  it('keeps client-visible plugin configuration separate from module rows', () => {
+    const manifest = parseBootManifest({
+      rev: 'graph',
+      entries: [{
+        id: 'a',
+        url: '/plugins/a/client.js?rev=0',
+        rev: '0',
+        config: { gatewayUrl: 'https://scholar.example' },
+      }],
+    })
+
+    expect(manifest.modules).toEqual([row('a')])
+    expect(manifest.plugins).toEqual([{
+      id: 'a',
+      inject: [],
+      immediately: false,
+      config: { gatewayUrl: 'https://scholar.example' },
+    }])
+  })
+
+  it('rejects non-object plugin configuration', () => {
+    expect(() => parseBootManifest({
+      rev: 'graph',
+      entries: [{ id: 'a', url: '/a.js', rev: '0', config: 'secret' }],
+    })).toThrow('config must be an object')
   })
 })
 

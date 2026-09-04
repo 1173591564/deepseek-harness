@@ -29,9 +29,9 @@ host 侧，cordis 插件装载站在 Node 的模块机制之上——require cac
 什么让一个包成为插件？只有一条规则：**一个包的消费方式一旦是 cordis 依赖注入，它就是插件包；在此之前它是普通包。**代码怎么到达页面不属于分类体系——到达方式由包的类别推得，而不是反过来定义类别。
 
 - **普通包**是模块系统自身所需的绝对基座，加上尚未转成 DI 的库：react 家族、cordis、`@deepseek-ai/dsh-client-modules`（模块系统本身——它永远不可能是插件，因为模块先于一切模块）、web 壳内核，以及——暂时——ui-slots、web-react、ui-primitives。普通包打进壳 bundle、播种进模块表、对 host 图不可见。
-- **插件包**是其余一切。每个都携带 `dsh.client` manifest（元数据清单）声明（`{ platform, inject, immediately? }`）和同一种统一形态：共享 tsdown 预设产出 `lib/client.js`，`exports["./client"]` 指向该 bundle。每个都是 host 编写的图里受治理的 entry。当前包括：connection、runtime、ui-theme、i18n、hmr（仅进 dev 图）、ui-layout、ui-sidebar、ui-conversation、ui-model-selector、ui-user-questions、ui-trajectory。
+- **插件包**是其余一切。每个都携带 `dsh.client` manifest（元数据清单）声明（`{ platform, inject, immediately?, config? }`）和同一种统一形态：共享 tsdown 预设产出 `lib/client.js`，`exports["./client"]` 指向该 bundle。每个都是 host 编写的图里受治理的 entry。当前包括：connection、runtime、ui-theme、i18n、hmr（仅进 dev 图）、ui-layout、ui-sidebar、ui-conversation、ui-model-selector、ui-user-questions、ui-trajectory。
 
-manifest 拥有包的装载约定：它的 `inject` 依赖边，加可选的 `immediately` 预取标记（缺省即 lazy）。负责组合的 app 只拥有名册。
+manifest 拥有包的装载约定：它的 `inject` 依赖边、可选的 `immediately` 预取标记（缺省即 lazy），以及可选的 `config` 字段名允许清单。Node 半只会把该 entry 的宿主配置中经允许的 JSON 值复制进启动图，浏览器再把这个投影后的对象传给 client 插件。仅供宿主使用的配置默认不会出现，而浏览器插件无需硬编码或开放通用宿主配置通道，也能接收由部署所有的设置。负责组合的 app 拥有名册和值。
 
 新增一个插件包：声明 `dsh.client`，经共享预设产出 `./client` bundle，把包名加进负责组合的 app 的名册。除此之外无需任何交接。
 
@@ -67,7 +67,7 @@ vendored Loader 经其 `internal` 约定消费模块系统——唯一调用点�
 **host 侧——组合这张图。**
 
 1. 负责组合的 app（`apps/cli`）把名册作为普通行放进它的 `cordis.yml` 配置树——client 插件包与每个 host 插件一样是 entry 行，包括无条件挂载的 `client-hmr` 行。名册行 import 失败由 `assertEntriesLoaded` 捕获；fiber reject 的行则由 `assertEntriesActivated` 报告原始 stack（[host boot 决策](2026-07-24-web-config-tree-boot-and-transport-layering.md)）。
-2. `dsh-client-modules` 的 node 半（该包是双面的：浏览器半就是模块表）扫描 loader entry 的 package.json `dsh.client` 声明，组合出 `window.__DSH_BOOT__`：`{ rev, entries: [{ id, url, rev, inject?, immediately? }] }`。`inject` 边与 `immediately` 标记都来自 manifest，永不人肉抄写。它会拒绝没有已构建 `./client` bundle 的已声明插件，并把它们的 package/path 行归到一条源码构建要求下；畸形声明字段同样会让激活失败，host 检查会从 FAILED fiber 报告这两类错误。
+2. `dsh-client-modules` 的 node 半（该包是双面的：浏览器半就是模块表）扫描 loader entry 的 package.json `dsh.client` 声明，组合出 `window.__DSH_BOOT__`：`{ rev, entries: [{ id, url, rev, inject?, immediately?, config? }] }`。`inject` 边、`immediately` 标记和 client 配置允许清单都来自 manifest，永不人肉抄写；每个发布的配置值必须是 JSON 数据。它会拒绝没有已构建 `./client` bundle 的已声明插件，并把它们的 package/path 行归到一条源码构建要求下；畸形声明字段同样会让激活失败，host 检查会从 FAILED fiber 报告这两类错误。
 3. 扫描是单包增量——不存在全量重扫代码路径。每次 cordis `internal/plugin` 发射把该 fiber 的 entry 名标脏（无 entry 的 fiber O(1) 丢弃）；微任务 flush 把每个脏名对账 live loader entries，包元数据（含「非 client 包」的否定结论）按名永久缓存，bundle 重哈希只经 `rebuilt(id)` 可达。激活趟从当前 entries 灌同一脏集合并同步 flush，初扫与稳态共享一条实现。每个 bundle 的内容哈希是其 `rev`（缓存失效 + HMR diff 锚点），行集合哈希进 `graph.rev`，每一行都作为脚本资源供给：`/plugins/<id>/client.js?rev=…`，对应 sourcemap 位于同一路径加 `.map`。图类型单源在 modules 包的 `./client` 出口——webserver 对图一无所知（它是朴素路由注册插件；bundle 路由和 index 渲染 tap 都由 modules 自己注册）。
 
 为什么名册是 yml 行而不是扫描？因为哪些插件组合进一次部署是组合决策，不是包属性——一个在仓库中声明了 dsh.client 的包，不代表这次部署要挂载它，扫描发现无从替人做这个决定；node 半只扫描配置树实际挂载了的东西。
