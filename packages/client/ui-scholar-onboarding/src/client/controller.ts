@@ -37,13 +37,16 @@ function identityOf(value: unknown): ProxyIdentity | undefined {
 export class ScholarOnboardingController {
   /** Snapshot consumed by the onboarding component. */
   readonly store: SnapshotStore<ScholarOnboardingState> = createSnapshotStore(INITIAL)
+  private readonly fetchIdentity: typeof fetch
 
   constructor(
     private readonly api: Pick<IApiClient, 'agentPresets' | 'credentials'>,
     private readonly identityUrl: string,
     private readonly validationTimeoutMs: number,
-    private readonly fetchIdentity: typeof fetch = fetch,
-  ) {}
+    fetchIdentity: typeof fetch = fetch,
+  ) {
+    this.fetchIdentity = (input, init) => fetchIdentity(input, init)
+  }
 
   private set(patch: Partial<ScholarOnboardingState>): void {
     this.store.set({ ...this.store.getSnapshot(), ...patch })

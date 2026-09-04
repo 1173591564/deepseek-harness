@@ -58,9 +58,12 @@ function harness(options: {
       set,
     },
   } as unknown as Pick<IApiClient, 'agentPresets' | 'credentials'>
-  const fetchIdentity = vi.fn(() => options.fetchReject === true
-    ? Promise.reject(new Error('network unavailable'))
-    : Promise.resolve(options.response ?? Response.json({ name: 'Literature group' })))
+  const fetchIdentity = vi.fn(function (this: unknown) {
+    if (this !== undefined) return Promise.reject(new TypeError('Illegal invocation'))
+    return options.fetchReject === true
+      ? Promise.reject(new Error('network unavailable'))
+      : Promise.resolve(options.response ?? Response.json({ name: 'Literature group' }))
+  })
   const controller = new ScholarOnboardingController(
     api,
     'https://scholar.example/v1/me',
