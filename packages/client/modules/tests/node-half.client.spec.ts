@@ -38,13 +38,23 @@ function writePackage(
 }
 
 /** Construct the node-half service and capture its plugin-bundle route. */
-function constructWithRoute(packageNames: string[]): { service: ClientModuleRegistry; route: WebRoute } {
+function constructWithRoute(
+  packageNames: string[],
+  configs: Record<string, Record<string, unknown>> = {},
+): { service: ClientModuleRegistry; route: WebRoute } {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root!).href + '/'
   ctx.provide('loader', {
     *entries() {
       for (const packageName of packageNames) {
-        yield { options: { name: packageName }, fiber: {}, disabled: false }
+        yield {
+          options: {
+            name: packageName,
+            ...(configs[packageName] === undefined ? {} : { config: configs[packageName] }),
+          },
+          fiber: {},
+          disabled: false,
+        }
       }
     },
   })
@@ -64,8 +74,11 @@ function constructWithRoute(packageNames: string[]): { service: ClientModuleRegi
 }
 
 /** Construct the node-half service over the enabled fixture entries. */
-function construct(packageNames: string[]): ClientModuleRegistry {
-  return constructWithRoute(packageNames).service
+function construct(
+  packageNames: string[],
+  configs: Record<string, Record<string, unknown>> = {},
+): ClientModuleRegistry {
+  return constructWithRoute(packageNames, configs).service
 }
 
 describe('client bundle activation', () => {
@@ -81,6 +94,49 @@ describe('client bundle activation', () => {
     mkdirSync(dirname(clientPath), { recursive: true })
     writeFileSync(clientPath, 'module.exports = {}\n')
     expect(construct([currentName]).graph().entries.map(entry => entry.id)).toEqual([currentName])
+  })
+
+  it('publishes only package-allowlisted host configuration', () => {
+    const packageName = '@fixture/client-config'
+    const clientPath = writePackage(packageName, {
+      dsh: {
+        client: {
+          platform: 'web',
+          config: ['gatewayUrl', 'validationTimeoutMs'],
+        },
+      },
+    })
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+
+    const graph = construct([packageName], {
+      [packageName]: {
+        gatewayUrl: 'https://scholar.example/v1/mcp/scholar',
+        validationTimeoutMs: 20_000,
+        backendCredential: 'must-not-reach-browser',
+      },
+    }).graph()
+
+    expect(graph.entries[0]).toMatchObject({
+      config: {
+        gatewayUrl: 'https://scholar.example/v1/mcp/scholar',
+        validationTimeoutMs: 20_000,
+      },
+    })
+    expect(JSON.stringify(graph)).not.toContain('must-not-reach-browser')
+  })
+
+  it('rejects non-JSON values in published configuration', () => {
+    const packageName = '@fixture/non-json-client-config'
+    const clientPath = writePackage(packageName, {
+      dsh: { client: { platform: 'web', config: ['gatewayUrl'] } },
+    })
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+
+    expect(() => construct([packageName], {
+      [packageName]: { gatewayUrl: new URL('https://scholar.example') },
+    })).toThrow('client config "gatewayUrl" must contain plain objects')
   })
 
   it('groups missing bundles under one source-build instruction with a package/path list', () => {

@@ -6,7 +6,7 @@
  * rewrites `lib/client.js` files triggers reloads; this script is merely the
  * convenient way to keep them all rebuilt on source change.
  *
- * Usage: `pnpm exec tsx scripts/dev-web.ts [--poll[=ms]]`. Requires the
+ * Usage: `node scripts/dev-web.ts [--poll[=ms]]`. Requires the
  * packages' node halves built once (`tsc -b tsconfig.build.json`): the lib
  * config's entries are tsc output. `--poll` switches the source-file watcher
  * to polling (default 500ms): network mounts (weka) deliver no inotify

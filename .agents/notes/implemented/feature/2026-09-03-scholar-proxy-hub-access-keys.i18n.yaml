@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-03-scholar-proxy-hub-access-keys.md
-2026-09-03-scholar-proxy-hub-access-keys.md: 459763af9843e86474188e3275cb5f0d02f86a83
-2026-09-03-scholar-proxy-hub-access-keys.zh.md: 7c55a972f3ccb766fa84a2f5c7d8ca1a8da9cadd
+2026-09-03-scholar-proxy-hub-access-keys.md: 723fb13cf04bebf241e16a9aa77f1e832852839c
+2026-09-03-scholar-proxy-hub-access-keys.zh.md: a270cb74931694a13bf472e214f9578ce014a052

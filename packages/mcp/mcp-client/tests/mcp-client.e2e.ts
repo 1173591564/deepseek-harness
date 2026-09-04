@@ -473,6 +473,10 @@ describe('streamable-http — in-process MCP server', () => {
         res.writeHead(307, { location: `http://127.0.0.1:${port}/mcp` }).end()
         return
       }
+      if (req.url === '/unavailable') {
+        res.writeHead(503).end('Unavailable')
+        return
+      }
       handleMcpRequest(req, res).catch((error: unknown) => {
         res.writeHead(500).end(String(error))
       })
@@ -570,18 +574,49 @@ describe('streamable-http — in-process MCP server', () => {
       path: join(directory, '.credentials.yaml'),
       watch: false,
     })
-    await isolated.credentials.set(credentialRef('MCP_WRONG_TOKEN'), 'wrong-token')
+    await isolated.credentials.set(credentialRef('MCP_WRONG_TOKEN'), 'stored-token')
+    process.env.MCP_WRONG_TOKEN = 'wrong-token'
+    try {
+      await expect(apply(isolated, {
+        transport: 'streamable-http',
+        serverName: 'wrong',
+        url: baseUrl,
+        headers: {},
+        bearerTokenEnv: 'MCP_WRONG_TOKEN',
+        toolCallTimeoutMs: 15_000,
+        failOnStartupError: true,
+        reconnect: { enabled: false },
+      })).rejects.toThrow('initial connection or tool synchronization failed')
+      expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
+    } finally {
+      delete process.env.MCP_WRONG_TOKEN
+    }
+    await expect(isolated.credentials.resolve(credentialRef('MCP_WRONG_TOKEN')))
+      .resolves.toBeUndefined()
+    await isolated.fiber.dispose()
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  it('preserves the Managed Credential after a server failure', async () => {
+    const isolated = await mountRegistry()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-unavailable-credentials-'))
+    await isolated.plugin(LocalCredentialProvider, {
+      path: join(directory, '.credentials.yaml'),
+      watch: false,
+    })
+    await isolated.credentials.set(credentialRef('MCP_UNAVAILABLE_TOKEN'), 'first-token')
     await expect(apply(isolated, {
       transport: 'streamable-http',
-      serverName: 'wrong',
-      url: baseUrl,
+      serverName: 'unavailable',
+      url: baseUrl.replace('/mcp', '/unavailable'),
       headers: {},
-      bearerTokenEnv: 'MCP_WRONG_TOKEN',
+      bearerTokenEnv: 'MCP_UNAVAILABLE_TOKEN',
       toolCallTimeoutMs: 15_000,
       failOnStartupError: true,
       reconnect: { enabled: false },
     })).rejects.toThrow('initial connection or tool synchronization failed')
-    expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
+    await expect(isolated.credentials.resolve(credentialRef('MCP_UNAVAILABLE_TOKEN')))
+      .resolves.toMatchObject({ value: 'first-token' })
     await isolated.fiber.dispose()
     await rm(directory, { recursive: true, force: true })
   })

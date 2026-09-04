@@ -75,9 +75,12 @@ function validateHttpConfig(config: StreamableHttpConfig): void {
   if (url.hash !== '') {
     throw new Error(`mcp-client(${config.serverName}): url must not contain a fragment`)
   }
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHostname(url.hostname))) {
+  if (
+    url.protocol !== 'https:'
+    && !(url.protocol === 'http:' && (isLoopbackHostname(url.hostname) || config.allowInsecureHttp === true))
+  ) {
     throw new Error(
-      `mcp-client(${config.serverName}): streamable-http requires HTTPS or an HTTP loopback URL`,
+      `mcp-client(${config.serverName}): streamable-http requires HTTPS, an HTTP loopback URL, or allowInsecureHttp: true`,
     )
   }
   for (const header of Object.keys(config.headers)) {
@@ -141,6 +144,11 @@ export interface StreamableHttpConfig {
   headers: Record<string, string>
   /** Credential reference resolved as an HTTP Bearer token for every request. */
   bearerTokenEnv?: string
+  /**
+   * Allow plaintext HTTP to a non-loopback host for development deployments.
+   * Bearer credentials and request bodies are exposed to the network.
+   */
+  allowInsecureHttp?: boolean
   /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
@@ -177,6 +185,7 @@ export const Config = z.union([
     url: z.string().required(),
     headers: z.dict(String).default({}),
     bearerTokenEnv: z.string().role('credential-ref'),
+    allowInsecureHttp: z.boolean().default(false),
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
@@ -199,6 +208,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // effect registers.
   const reconnect = resolveReconnectPolicy(config.reconnect, `mcp-client(${config.serverName}): reconnect`)
   let resolveBearerToken: (() => Promise<string>) | undefined
+  let onAuthenticationRejected: (() => Promise<void>) | undefined
   if (config.transport === 'streamable-http') {
     validateHttpConfig(config)
     if (config.bearerTokenEnv !== undefined) {
@@ -212,6 +222,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         throw new Error(
           `mcp-client(${config.serverName}): credential "${ref}" is not configured`,
         )
+      }
+      onAuthenticationRejected = async () => {
+        const credentials = ctx.get('credentials')
+        if (credentials === undefined) return
+        try {
+          await credentials.unset(ref)
+        } catch (error) {
+          ctx.logger.warn(
+            `mcp-client(${config.serverName}): authentication was rejected but credential "${ref}" could not be removed: %o`,
+            error,
+          )
+        }
       }
     }
   }
@@ -236,7 +258,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // The supervisor owns the client/transport generations, the reconnect
   // loop, and the live tool registrations; disposal stops reconnection,
   // quiesces in-flight work, and unregisters the current generation.
-  const connection = startConnection(ctx, config, reconnect, resolveBearerToken)
+  const connection = startConnection(
+    ctx,
+    config,
+    reconnect,
+    resolveBearerToken,
+    onAuthenticationRejected,
+  )
 
   ctx.effect(() => {
     return () => connection.dispose()

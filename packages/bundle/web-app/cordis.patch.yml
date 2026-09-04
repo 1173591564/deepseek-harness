@@ -192,6 +192,12 @@
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
 
+    - id: ui-scholar-onboarding
+      name: '@deepseek-ai/dsh-client-ui-scholar-onboarding'
+      config:
+        gatewayUrl: http://47.108.198.147:8081/v1/mcp/scholar
+        allowInsecureHttp: true
+
     - id: ui-settings-plugin-inventory
       name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
 

@@ -58,6 +58,8 @@ export interface WebBootEntry {
   inject?: string[]
   /** Stage-one prefetch mark: load the script for factory registration during module-face boot. */
   immediately?: boolean
+  /** Host configuration fields explicitly published by the package's `dsh.client.config` allowlist. */
+  config?: Record<string, unknown>
 }
 
 /** The composed client entry graph the host injects as `window.__DSH_BOOT__`. */
@@ -86,6 +88,8 @@ export interface BootPluginRow {
   inject: string[]
   /** Stage-one prefetch tier (false when the wire omits it). */
   immediately: boolean
+  /** Client-visible plugin configuration (empty when the package publishes no fields). */
+  config: Record<string, unknown>
 }
 
 /** The parsed boot manifest: one wire, two consumer views. */
@@ -133,11 +137,15 @@ export function parseBootManifest(wire: unknown): BootManifest {
     if (row.immediately !== undefined && typeof row.immediately !== 'boolean') {
       throw new Error(`client-modules: boot manifest entry ${where} immediately must be a boolean`)
     }
+    if (row.config !== undefined && (typeof row.config !== 'object' || row.config === null || Array.isArray(row.config))) {
+      throw new Error(`client-modules: boot manifest entry ${where} config must be an object`)
+    }
     modules.push({ id: row.id, url: row.url, rev: row.rev })
     plugins.push({
       id: row.id,
       inject: row.inject === undefined ? [] : [...row.inject as string[]],
       immediately: row.immediately === true,
+      config: row.config === undefined ? {} : { ...row.config as Record<string, unknown> },
     })
   }
   return { rev: graph.rev, modules, plugins }

@@ -49,6 +49,8 @@ interface DshClientDeclaration {
   platform: string
   /** Boot phase-one prefetch mark; absent means lazy (fetched on demand). */
   immediately?: boolean
+  /** Host plugin config fields safe to publish to the browser boot manifest. */
+  config?: string[]
 }
 
 /** Resolved package metadata for one `dsh.client` package (cached per name, never expires). */
@@ -56,7 +58,10 @@ interface PkgMeta {
   clientPath: string
   inject?: string[]
   immediately: boolean
+  config?: string[]
 }
+
+type WireValue = null | string | number | boolean | WireValue[] | { [key: string]: WireValue }
 
 /** Recovery instruction shared by grouped startup and steady-state bundle diagnostics. */
 const CLIENT_BUNDLE_BUILD_INSTRUCTION = 'run `pnpm run build` before launch'
@@ -121,11 +126,73 @@ function parseDshClient(pkgName: string, value: unknown): DshClientDeclaration |
   if (decl.immediately !== undefined && typeof decl.immediately !== 'boolean') {
     throw new Error(`client-modules: ${pkgName} dsh.client.immediately must be a boolean`)
   }
+  if (
+    decl.config !== undefined
+    && (
+      !Array.isArray(decl.config)
+      || decl.config.some(key => typeof key !== 'string' || key.length === 0)
+      || new Set(decl.config).size !== decl.config.length
+    )
+  ) {
+    throw new Error(`client-modules: ${pkgName} dsh.client.config must be an array of unique non-empty strings`)
+  }
   return {
     platform: decl.platform,
     ...(decl.inject !== undefined ? { inject: decl.inject as string[] } : {}),
     ...(decl.immediately !== undefined ? { immediately: decl.immediately } : {}),
+    ...(decl.config !== undefined ? { config: decl.config as string[] } : {}),
   }
+}
+
+/** Convert one explicitly published config value into JSON data without lossy coercion. */
+function wireValue(pkgName: string, key: string, value: unknown, seen: WeakSet<object>): WireValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) return value
+    throw new Error(`client-modules: ${pkgName} client config "${key}" must contain finite numbers`)
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) throw new Error(`client-modules: ${pkgName} client config "${key}" must not contain cycles`)
+    seen.add(value)
+    const result = value.map(item => wireValue(pkgName, key, item, seen))
+    seen.delete(value)
+    return result
+  }
+  if (typeof value !== 'object') {
+    throw new Error(`client-modules: ${pkgName} client config "${key}" must contain JSON values`)
+  }
+  if (seen.has(value)) throw new Error(`client-modules: ${pkgName} client config "${key}" must not contain cycles`)
+  const prototype = Reflect.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`client-modules: ${pkgName} client config "${key}" must contain plain objects`)
+  }
+  seen.add(value)
+  const result: { [key: string]: WireValue } = {}
+  for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    if (childValue === undefined) continue
+    result[childKey] = wireValue(pkgName, key, childValue, seen)
+  }
+  seen.delete(value)
+  return result
+}
+
+/** Publish only package-declared host config fields into the browser graph. */
+function projectClientConfig(
+  pkgName: string,
+  keys: string[] | undefined,
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (keys === undefined || keys.length === 0) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`client-modules: ${pkgName} declares client config fields but its host config is not an object`)
+  }
+  const source = value as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  for (const key of keys) {
+    if (!Object.hasOwn(source, key) || source[key] === undefined) continue
+    result[key] = wireValue(pkgName, key, source[key], new WeakSet())
+  }
+  return result
 }
 
 /** Resolve `exports["./client"]` to a relative path, accepting the string and one-level conditional forms. */
@@ -147,13 +214,20 @@ function shortHash(input: string | Buffer): string {
 }
 
 /** Graph row for one bundle rev (url carries the rev as its cache-busting query). */
-function graphRow(id: string, rev: string, injectEdges: string[] | undefined, immediately: boolean): WebBootEntry {
+function graphRow(
+  id: string,
+  rev: string,
+  injectEdges: string[] | undefined,
+  immediately: boolean,
+  config?: Record<string, unknown>,
+): WebBootEntry {
   return {
     id,
     url: `/plugins/${id}/client.js?rev=${rev}`,
     rev,
     ...(injectEdges !== undefined ? { inject: injectEdges } : {}),
     ...(immediately ? { immediately: true } : {}),
+    ...(config !== undefined ? { config } : {}),
   }
 }
 
@@ -276,7 +350,7 @@ export class ClientModuleRegistry extends Service {
     if (record === undefined) return undefined
     const rev = shortHash(readFileSync(record.clientPath))
     if (rev === record.entry.rev) return rev
-    record.entry = graphRow(id, rev, record.entry.inject, record.entry.immediately === true)
+    record.entry = graphRow(id, rev, record.entry.inject, record.entry.immediately === true, record.entry.config)
     this.composed = this.compose()
     for (const notify of this.rebuildListeners) {
       // Containment: rebuilt() runs inside the HMR watch callback — a
@@ -359,6 +433,7 @@ export class ClientModuleRegistry extends Service {
       clientPath: join(dirname(pkgPath), clientRel),
       ...(decl.inject !== undefined ? { inject: decl.inject } : {}),
       immediately: decl.immediately === true,
+      ...(decl.config !== undefined ? { config: decl.config } : {}),
     }
     this.pkgMeta.set(pkgName, meta)
     return meta
@@ -382,10 +457,12 @@ export class ClientModuleRegistry extends Service {
 
   /** Reconcile one entry name against the live loader entries. @returns whether the table changed. */
   private processOne(entryName: string): boolean {
+    let hostConfig: unknown
     let qualifies = false
     for (const entry of this.ctx.loader.entries()) {
       if (entry.options.name === entryName && entry.fiber !== undefined && !entry.disabled) {
         qualifies = true
+        hostConfig = entry.options.config
         break
       }
     }
@@ -396,7 +473,11 @@ export class ClientModuleRegistry extends Service {
     // The rev rides the row from here on: a fiber restart reuses the row (and
     // its rev) untouched; only rebuilt() re-reads the bundle.
     const rev = this.initialBundleRevision(entryName, meta.clientPath)
-    this.table.set(entryName, { entry: graphRow(entryName, rev, meta.inject, meta.immediately), clientPath: meta.clientPath })
+    const config = projectClientConfig(entryName, meta.config, hostConfig)
+    this.table.set(entryName, {
+      entry: graphRow(entryName, rev, meta.inject, meta.immediately, config),
+      clientPath: meta.clientPath,
+    })
     return true
   }
 

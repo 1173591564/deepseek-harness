@@ -259,8 +259,23 @@ describe('apply (plugin lifecycle)', () => {
       bearerTokenEnv: 'MCP_REMOTE_TOKEN',
       toolCallTimeoutMs: 60_000,
       failOnStartupError: true,
-    })).rejects.toThrow(/requires HTTPS or an HTTP loopback URL/)
+    })).rejects.toThrow(/requires HTTPS, an HTTP loopback URL, or allowInsecureHttp: true/)
     expect(mockConnect).not.toHaveBeenCalled()
+  })
+
+  it('accepts non-loopback HTTP only with the development override', async () => {
+    await apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'remote',
+      url: 'http://192.0.2.10/mcp',
+      headers: {},
+      bearerTokenEnv: 'MCP_REMOTE_TOKEN',
+      allowInsecureHttp: true,
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })
+
+    expect(mockConnect).toHaveBeenCalled()
   })
 
   it('rejects static sensitive authentication headers', async () => {
@@ -292,7 +307,7 @@ describe('apply (plugin lifecycle)', () => {
   )
 
   it.each([
-    ['http://localhost:3000/mcp', /requires HTTPS or an HTTP loopback URL/],
+    ['http://localhost:3000/mcp', /requires HTTPS, an HTTP loopback URL, or allowInsecureHttp: true/],
     ['https://user:secret@mcp.example.test/mcp', /must not contain userinfo/],
     ['https://mcp.example.test/mcp#fragment', /must not contain a fragment/],
   ])('rejects an unsafe Streamable HTTP URL: %s', async (url, error) => {

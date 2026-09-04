@@ -45,6 +45,7 @@ The model sees `mcp__github__create_issue`, `mcp__web__search`, … — the same
 | `url` | http | yes | MCP server URL |
 | `headers` | http | no | Non-sensitive extra headers. Static authentication, cookie, API-key-like, forwarding, and Host headers are rejected |
 | `bearerTokenEnv` | http | no | Credential reference resolved as a Bearer token before every HTTP operation |
+| `allowInsecureHttp` | http | no | Development-only override for non-loopback HTTP (default `false`); exposes Bearer credentials and request bodies to the network |
 | `toolCallTimeoutMs` | both | no | Timeout per `callTool` invocation (default 60000) |
 | `failOnStartupError` | both | no | Reject plugin activation when initial connection or tool synchronization fails (default `false`) |
 | `reconnect.enabled` | both | no | Reconnect automatically after a lost connection (default `true`) |
@@ -64,7 +65,7 @@ Every MCP tool has two names: the raw MCP name (sent on the wire in `tools/call`
 ## Behavior
 
 - On connect: plugin activation awaits `listTools()` and registers each tool via `ctx.tools.register()` under its public name before the composition starts its first turn. Initial connection, discovery, or registration failure is always logged; it rejects activation when `failOnStartupError` is true and otherwise activates with no tools.
-- Streamable HTTP accepts HTTPS endpoints and explicit HTTP loopback endpoints. It resolves `bearerTokenEnv` for every operation, rejects redirects, and fails before network access when the referenced credential is missing.
+- Streamable HTTP accepts HTTPS endpoints and explicit HTTP loopback endpoints. Non-loopback HTTP requires `allowInsecureHttp: true` and is intended only for development. It resolves `bearerTokenEnv` for every operation, rejects redirects, and fails before network access when the referenced credential is missing. An explicit `401` or `403` removes a provider-managed credential; network failures, timeouts, `5xx` responses, and MCP Tool errors preserve it.
 - Listens for `notifications/tools/list_changed` → re-syncs; a fetch-phase failure keeps the previous generation registered, while a registration conflict rolls back the attempted generation and leaves no tools from that server.
 - Tool execute: `client.callTool({ name: rawName, arguments }, { signal })` with timeout + abort support—the public name is never sent to the server.
 - Canonical success is `{ content: JsonValue[], structuredContent? }`; complete JSON MCP blocks survive for programmatic callers. A supported advertised `outputSchema` validates `structuredContent`; unsupported schema vocabulary falls back to unconstrained `JsonValue`.
