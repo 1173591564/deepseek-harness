@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Config } from '@deepseek-ai/dsh-mcp-client'
 
 // ---- Mock MCP SDK ----
@@ -483,5 +484,45 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(mockConnect).toHaveBeenCalled()
     expect(ctx.tools.get('mcp__web__remote')).toBeDefined()
+  })
+
+  it('retries a stopped authenticated connection when its credential is updated', async () => {
+    mockConnect.mockRejectedValueOnce(new Error('old credential'))
+    const bearerRef = credentialRef(`MCP_APPLY_WAKE_${process.pid}`)
+    const httpConfig: Config = {
+      transport: 'streamable-http',
+      serverName: 'web',
+      url: 'http://127.0.0.1:3000/mcp',
+      headers: {},
+      bearerTokenEnv: bearerRef,
+      toolCallTimeoutMs: 30_000,
+      failOnStartupError: false,
+      reconnect: { enabled: false },
+    }
+    await apply(ctx, httpConfig)
+    expect(ctx.tools.get('mcp__web__remote')).toBeUndefined()
+
+    ctx.emit('credentials/updated', credentialRef('OTHER_TOKEN'))
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+
+    ctx.emit('credentials/updated', bearerRef)
+    await sleep(30)
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+
+    const previous = process.env[bearerRef]
+    try {
+      process.env[bearerRef] = 'new-token'
+      ctx.emit('credentials/updated', bearerRef)
+      await vi.waitFor(() => { expect(ctx.tools.get('mcp__web__remote')).toBeDefined() })
+      expect(mockConnect).toHaveBeenCalledTimes(2)
+
+      await ctx.fiber.dispose()
+      ctx.emit('credentials/updated', bearerRef)
+      await sleep(30)
+      expect(mockConnect).toHaveBeenCalledTimes(2)
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process.env, bearerRef)
+      else process.env[bearerRef] = previous
+    }
   })
 })

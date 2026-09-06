@@ -567,32 +567,57 @@ describe('streamable-http — in-process MCP server', () => {
     await isolated.fiber.dispose()
   })
 
-  it('rejects a wrong Bearer credential at the server', async () => {
+  it('connects after a missing Managed Credential is stored', async () => {
     const isolated = await mountRegistry()
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-wrong-credentials-'))
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-late-credentials-'))
+    const lateRef = credentialRef(`MCP_E2E_LATE_${process.pid}`)
     await isolated.plugin(LocalCredentialProvider, {
       path: join(directory, '.credentials.yaml'),
       watch: false,
     })
-    await isolated.credentials.set(credentialRef('MCP_WRONG_TOKEN'), 'stored-token')
-    process.env.MCP_WRONG_TOKEN = 'wrong-token'
-    try {
-      await expect(apply(isolated, {
-        transport: 'streamable-http',
-        serverName: 'wrong',
-        url: baseUrl,
-        headers: {},
-        bearerTokenEnv: 'MCP_WRONG_TOKEN',
-        toolCallTimeoutMs: 15_000,
-        failOnStartupError: true,
-        reconnect: { enabled: false },
-      })).rejects.toThrow('initial connection or tool synchronization failed')
-      expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
-    } finally {
-      delete process.env.MCP_WRONG_TOKEN
-    }
-    await expect(isolated.credentials.resolve(credentialRef('MCP_WRONG_TOKEN')))
-      .resolves.toBeUndefined()
+    await apply(isolated, {
+      transport: 'streamable-http',
+      serverName: 'late',
+      url: baseUrl,
+      headers: {},
+      bearerTokenEnv: lateRef,
+      toolCallTimeoutMs: 15_000,
+      failOnStartupError: false,
+      reconnect: { enabled: false },
+    })
+    expect(isolated.tools.get('mcp__late__ping')).toBeUndefined()
+
+    await isolated.credentials.set(lateRef, 'first-token')
+
+    await vi.waitFor(() => {
+      expect(isolated.tools.get('mcp__late__ping')).toBeDefined()
+    })
+    expect(seenAuth.at(-1)).toBe('Bearer first-token')
+    await isolated.fiber.dispose()
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  it('rejects a wrong Bearer credential at the server', async () => {
+    const isolated = await mountRegistry()
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-wrong-credentials-'))
+    const rejectedRef = credentialRef(`MCP_E2E_REJECTED_${process.pid}`)
+    await isolated.plugin(LocalCredentialProvider, {
+      path: join(directory, '.credentials.yaml'),
+      watch: false,
+    })
+    await isolated.credentials.set(rejectedRef, 'wrong-token')
+    await expect(apply(isolated, {
+      transport: 'streamable-http',
+      serverName: 'wrong',
+      url: baseUrl,
+      headers: {},
+      bearerTokenEnv: rejectedRef,
+      toolCallTimeoutMs: 15_000,
+      failOnStartupError: true,
+      reconnect: { enabled: false },
+    })).rejects.toThrow('initial connection or tool synchronization failed')
+    expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
+    await expect(isolated.credentials.resolve(rejectedRef)).resolves.toBeUndefined()
     await isolated.fiber.dispose()
     await rm(directory, { recursive: true, force: true })
   })

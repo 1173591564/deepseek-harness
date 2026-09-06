@@ -10,13 +10,13 @@ Status: implemented
 
 ## 决策
 
-`packages/mcp/mcp-client/src/connection.ts` 拥有一个逐实例的连接监督器；`apply()` 收缩为配置解析加两个副作用（`serverName` 预留和监督器的生命周期）。监督器负责管理 client/transport 代、活跃的工具注册以及重连循环。
+`packages/mcp/mcp-client/src/connection.ts` 拥有一个逐实例的连接监督器；`apply()` 解析配置，并把 `serverName` 预留、credential update listener 与 supervisor lifecycle 绑定到 plugin fiber。监督器负责管理 client/transport generation、活跃的工具注册以及重连循环。
 
-**触发条件。** 监督器在每一代上挂载 `client.onclose`。SDK 在 stdio 子进程退出时触发该回调，因此崩溃无需轮询即可感知。`StreamableHTTPClientTransport` 仅在主动关闭时触发 `onclose`——它内部拥有自己的 SSE（Server-Sent Events）流恢复机制，并将请求失败以逐调用方式暴露——因此 HTTP 服务器实际上不在监督器的重启范围内；包 README 记录了该限制。
+**触发条件。** 监督器在每一代上挂载 `client.onclose`。SDK 在 stdio 子进程退出时触发该回调，因此崩溃无需轮询即可感知。`StreamableHTTPClientTransport` 自行恢复内部 SSE（Server-Sent Events）流，并按调用暴露已建立连接后的请求失败；这些失败不会重启 supervisor generation。初始 HTTP 连接失败仍进入 supervisor 的重试策略。对于带身份验证的 HTTP，`apply()` 监听配置的 Managed Credential 更新，并在更新能解析到已配置值且 supervisor 停止时请求新的尝试。
 
 **代隔离，无交错。** 每次尝试构建一个全新的 transport 和 `Client`（SDK 将一个 Protocol 绑定到一个 transport 上终身使用）。每个监督器内部有一个队列将所有 `syncTools` 调用串行化——跨所有代的初始同步和 `list_changed` 再同步——`isCurrent` 栅栏使过时的代变为惰性，从而确保不会有两次同步交错执行 dispose 上一代/注册下一代的切换（否则会对同一代执行两次 dispose 并泄漏另一代）。该队列还消除了一个先前存在的竞态：两次快速的 `list_changed` 通知同时触发重新同步。严格启动注册由激活尝试本身显式拥有，而非由首个入队者拥有；提前到达的 `list_changed` 采用故障隔离的再同步语义，不能消费 `failOnStartupError`。失败信号按代幂等：一次连接拒绝与其自身 transport 关闭竞态时，仅调度恰好一次重试。失败尝试只有在 `Client.close()` 结算且 transport 报告 `onclose` 后才能进入退避；对 stdio 而言，`onclose` 证明子进程已退出；若关闭信号始终未到，则在 SDK 的有界终止窗口结束后停止重连，而不是允许两个服务器进程重叠运行。dispose 使用同一个有界关闭信号屏障；若关停未完成则予以报告，且绝不重启。
 
-**有界退避与故障预算。** 延迟从 `initialDelayMs` 起逐次翻倍，上限为 `maxDelayMs`。一次故障期间共享 `maxAttempts` 次连续失败尝试的预算；耗尽后注销该服务器的工具、以 error 级别记录日志并停止，直到 dispose 或重新加载。连接在存活超过稳定窗口——即 `maxDelayMs`，作为最长退避间隔从配置推导得出而非作为第五个独立调参项——之后重置预算；因此偶尔崩溃的服务器可无限恢复，而连接短暂成功后立即再次崩溃的循环无法将其预算洗白为重启风暴。
+**有界退避与故障预算。** 延迟从 `initialDelayMs` 起逐次翻倍，上限为 `maxDelayMs`。一次故障期间共享 `maxAttempts` 次连续失败尝试的预算；耗尽后注销该服务器的工具、以 error 级别记录日志并暂停自动重试。匹配且能解析到已配置值的 Managed Credential 更新会立即使用新预算启动一次尝试；单独删除 credential 不会启动。连接尝试期间收到的请求会合并，并仅在该尝试失败后执行；退避期间的请求替换定时器，已建立连接或已 dispose 的 supervisor 忽略请求。连接在存活超过稳定窗口——即 `maxDelayMs`，作为最长退避间隔从配置推导得出而非作为第五个独立调参项——之后重置预算；因此偶尔崩溃的服务器可无限恢复，而连接短暂成功后立即再次崩溃的循环无法将其预算洗白为重启风暴。
 
 **配置与解析。** 两种传输均接受 `reconnect { enabled, initialDelayMs, maxDelayMs, maxAttempts }` 配置，Schemastery 默认值为（启用、500ms、30s、10）。`resolveReconnectPolicy()` 是显式的解析步骤：它重新校验每个边界值和跨字段约束，因为程序化构造可能绕过 Schemastery，配置错误在加载时即令插件实例失败。
 
@@ -38,11 +38,11 @@ Status: implemented
 
 ## 测试
 
-单元测试（`tests/reconnect.spec.ts`，mock SDK）：恢复在不产生重复或泄漏的前提下切换代并服务恢复后的调用、诊断区分初始或重试尝试失败与已建立连接丢失、严格启动注册在连接前收到 `list_changed` 通知后仍然生效、初始化失败会等待旧代的关闭信号，若该信号始终未到则停止重连、dispose 同样等待同一关闭信号，并在有界等待到期时报告关停未完成、失败上限注销工具并停止、dispose 取消待执行的退避并使进行中的同步完全停稳、dispose 后的关闭不调度任何操作、禁用模式保持 v1 行为、稳定窗口重置预算而崩溃循环耗尽预算、双重失败信号仅调度一次重试、过时的代和处理器为惰性、`resolveReconnectPolicy` 拒绝每个无效边界值。E2E（`tests/mcp-client.e2e.ts`，无需密钥）：fixture 服务器新增了一个 `crash` 工具（先回复再退出）；真实进程测试证明 stdio 崩溃端到端恢复，以及在故障期间卸载插件能立即停止重连。快照：刻意不做，原因与原 Agent Note 相同——重连不引入新的展示形态，而在快照组合中 spawn 崩溃服务器会使回放依赖时序。
+单元测试（`tests/reconnect.spec.ts`，mock SDK）：恢复在不产生重复或泄漏的前提下切换 generation 并服务恢复后的调用、诊断区分初始或重试失败与已建立连接丢失、严格启动注册在连接前收到 `list_changed` 后仍然生效、初始化失败等待旧 generation 的关闭信号并在信号缺失时停止、dispose 等待同一信号并提供有界的关停未完成路径、失败上限注销工具并停止、重连请求在不重叠 generation 的前提下重启已耗尽或等待中的 supervisor、已建立连接和已 dispose 的 supervisor 忽略请求、dispose 取消退避并使进行中的同步完全停稳、dispose 后的关闭不调度操作、禁用模式关闭自动恢复、稳定窗口重置预算而崩溃循环耗尽预算、双重失败信号仅调度一次重试、过时的 generation 与 handler 为惰性，并且 `resolveReconnectPolicy` 拒绝每个无效边界值。集成覆盖验证只有匹配且已配置的 Managed Credential 更新会唤醒带身份验证的 HTTP supervisor。无需密钥的 E2E 覆盖真实 stdio 崩溃恢复、故障期间卸载、逐请求 Bearer 解析、缺失的 Managed Credential 保存后恢复、身份验证拒绝后的 credential 删除，以及服务器失败后的 credential 保留。刻意不做快照，因为重连不增加展示状态，而崩溃服务器 composition 会使回放依赖时序。
 
 ## 后果
 
 - 崩溃的 stdio MCP 服务器无需人工干预即可恢复：有界退避、重新发现、原子代切换。默认策略对一次故障大约重试 2.5 分钟后放弃。
 - 连接状态确实比一次性连接更复杂——v1 刻意回避的部分可用窗口现已存在（故障期间已注册工具返回失败），集中在一个模块中并命名了所有不变式。
 - `reconnect` 是两种传输上的新配置表面，稳定窗口刻意从 `maxDelayMs` 推导；将其设为独立可调参数是兼容的未来变更。
-- 最终失败后或禁用重连时，插件保持加载状态但无（或失败的）工具，直到重新加载——行为是刻意的且有日志记录，确保长期故障的服务器不能永远重启。
+- 最终失败后，插件保持加载状态但没有工具，直到匹配且能解析到已配置值的 Managed Credential 更新、重新加载或重启；单独删除 credential 不会唤醒 supervisor。禁用自动重连仍允许该显式 credential-driven 尝试，因此替换被拒绝的 Token 无需重启 Host。

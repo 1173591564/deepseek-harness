@@ -1,7 +1,7 @@
 ﻿# Scholar DSH 学术专用版
 # 一键安装：wheel 本地直装 + DSH Token onboarding
 param(
-    [string]$Wheel = "$PSScriptRoot\scholar_studio-0.2.6-py3-none-any.whl"
+    [string]$Wheel = "$PSScriptRoot\scholar_studio-0.2.7-py3-none-any.whl"
 )
 $ErrorActionPreference = 'Stop'
 $Gateway = "http://47.108.198.147:8081/v1/mcp/scholar"

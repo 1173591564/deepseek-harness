@@ -15,7 +15,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { isIP } from 'node:net'
@@ -209,10 +209,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const reconnect = resolveReconnectPolicy(config.reconnect, `mcp-client(${config.serverName}): reconnect`)
   let resolveBearerToken: (() => Promise<string>) | undefined
   let onAuthenticationRejected: (() => Promise<void>) | undefined
+  let bearerCredentialRef: CredentialRef | undefined
   if (config.transport === 'streamable-http') {
     validateHttpConfig(config)
     if (config.bearerTokenEnv !== undefined) {
       const ref = credentialRef(config.bearerTokenEnv)
+      bearerCredentialRef = ref
       resolveBearerToken = async () => {
         const credentials = ctx.get('credentials')
         const hit = credentials === undefined
@@ -265,6 +267,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     resolveBearerToken,
     onAuthenticationRejected,
   )
+
+  if (bearerCredentialRef !== undefined && resolveBearerToken !== undefined) {
+    const resolver = resolveBearerToken
+    const reconnectWhenConfigured = async (): Promise<void> => {
+      const configured = await resolver().then(
+        () => true,
+        () => false,
+      )
+      if (!configured) return
+      connection.requestReconnect()
+    }
+    ctx.on('credentials/updated', (ref: CredentialRef) => {
+      if (ref !== bearerCredentialRef) return
+      void reconnectWhenConfigured()
+    })
+  }
 
   ctx.effect(() => {
     return () => connection.dispose()

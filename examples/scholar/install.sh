@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scholar DSH 学术专用版 — 一键安装（Linux/macOS；Token onboarding）
 set -euo pipefail
-WHEEL="${WHEEL_PATH:-$(dirname "$0")/scholar_studio-0.2.6-py3-none-any.whl}"
+WHEEL="${WHEEL_PATH:-$(dirname "$0")/scholar_studio-0.2.7-py3-none-any.whl}"
 GATEWAY="http://47.108.198.147:8081/v1/mcp/scholar"
 echo "[1/2] pip install $WHEEL（含依赖，需可访问 PyPI）"
 python3 -m pip install --upgrade --no-cache-dir "$WHEEL"

@@ -9,14 +9,14 @@
 - Local 模式通过 stdio 启动 `python -m scholar_mcp`，并可读取独立安装的本地 corpus data pack。
 - Remote 模式通过 Proxy Hub 连接 Scholar。Server 拥有 central corpus、embedding 与 vector index；Proxy Hub 执行用户、租户、工具、配额、路由和审计策略。
 - 两种模式都将 15 个固定 Scholar skill 保留为 client asset。
-- Scholar connection 与 tool synchronization 是 mandatory；academic composition 使用 `failOnStartupError: true`。
+- 本地 stdio 将 Scholar 启动失败视为致命错误；远程 Proxy Hub 模式在初始失败后仍保持 academic composition 加载，并在后台重连。
 
 ## 本地开发安装
 
-挂载 example 前先安装 Scholar Studio 0.2.6 并初始化本地资产：
+挂载 example 前先安装 Scholar Studio 0.2.7 并初始化本地资产：
 
 ```sh
-python -m pip install scholar-studio==0.2.6
+python -m pip install scholar-studio==0.2.7
 scholar init
 node examples/scholar/setup.mjs
 ```
@@ -29,7 +29,7 @@ node examples/scholar/setup.mjs uninstall
 
 ## Release 安装
 
-Release bundle 包含 `scholar_studio-0.2.6-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 会初始化 15 个本地 skill 和 academic preset，但不保存 Token。
+Release bundle 包含 `scholar_studio-0.2.7-py3-none-any.whl`、`install.sh` 与 `install.ps1`。两个 installer 会初始化 15 个本地 skill 和 academic preset，但不保存 Token。
 
 ```sh
 bash install.sh
@@ -38,6 +38,8 @@ bash install.sh
 运行 `dsh web` 并选择 academic preset。Onboarding step 只要求管理员签发的 Scholar Token，通过 Proxy Hub `/v1/me` 验证成功后才写入 owner-only Managed Credential；后续 session 自动复用该 credential。
 
 明确的 `401` 与 `403` 要求替换 Token。Network failure、timeout 和 `5xx` response 会保留已有 Managed Credential。
+
+远程初始停机不会回滚 academic preset。DSH 会在后台重试；保存已配置的替换 Token 会唤醒已停止的 connection supervisor，无需重启 DSH。
 
 该开发版本固定使用 `http://47.108.198.147:8081/v1/mcp/scholar` endpoint，并显示明文传输警告。只能使用可撤销的测试 Token；production release 必须使用固定 HTTPS endpoint。
 
