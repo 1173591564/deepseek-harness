@@ -197,6 +197,88 @@ describe('reconnect supervisor', () => {
     expect(mockConnect).toHaveBeenCalledTimes(3)
   })
 
+  it('starts a fresh outage budget when an external change requests reconnect after exhaustion', async () => {
+    const { infos } = captureLogs(ctx)
+    mockConnect.mockRejectedValue(new Error('server gone'))
+    const handle = startConnection(
+      ctx,
+      stdioConfig({ initialDelayMs: 2, maxDelayMs: 8, maxAttempts: 1 }),
+      resolveReconnectPolicy(
+        { initialDelayMs: 2, maxDelayMs: 8, maxAttempts: 1 },
+        'reconnect',
+      ),
+    )
+    await handle.ready
+    await vi.waitFor(() => { expect(mockConnect).toHaveBeenCalledTimes(2) })
+
+    mockConnect.mockResolvedValue(undefined)
+    handle.requestReconnect()
+
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(mockConnect).toHaveBeenCalledTimes(3)
+    expect(infos.some(line => line.includes('connection retry requested; reconnecting now'))).toBe(true)
+    await handle.dispose()
+  })
+
+  it('cancels backoff and reconnects immediately when an external change requests it', async () => {
+    mockConnect.mockRejectedValueOnce(new Error('initial failure'))
+    const handle = startConnection(
+      ctx,
+      stdioConfig({ initialDelayMs: 60_000, maxDelayMs: 60_000, maxAttempts: 2 }),
+      resolveReconnectPolicy(
+        { initialDelayMs: 60_000, maxDelayMs: 60_000, maxAttempts: 2 },
+        'reconnect',
+      ),
+    )
+    await handle.ready
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+
+    handle.requestReconnect()
+
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(mockConnect).toHaveBeenCalledTimes(2)
+    await handle.dispose()
+  })
+
+  it('coalesces reconnect requests during an in-flight attempt without overlapping generations', async () => {
+    const first: PromiseWithResolvers<void> = Promise.withResolvers()
+    mockConnect.mockImplementationOnce(() => first.promise)
+    const handle = startConnection(
+      ctx,
+      stdioConfig({ enabled: false }),
+      resolveReconnectPolicy({ enabled: false }, 'reconnect'),
+    )
+    await vi.waitFor(() => { expect(instances).toHaveLength(1) })
+
+    handle.requestReconnect()
+    handle.requestReconnect()
+    expect(instances).toHaveLength(1)
+
+    first.reject(new Error('old credential'))
+    await vi.waitFor(() => { expect(instances).toHaveLength(2) })
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(mockConnect).toHaveBeenCalledTimes(2)
+    await handle.dispose()
+  })
+
+  it('ignores reconnect requests while connected and after disposal', async () => {
+    const handle = startConnection(
+      ctx,
+      stdioConfig(),
+      resolveReconnectPolicy(undefined, 'reconnect'),
+    )
+    await handle.ready
+    expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
+
+    handle.requestReconnect()
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+
+    await handle.dispose()
+    handle.requestReconnect()
+    await sleep(30)
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+  })
+
   it('gives up behind an in-flight re-sync and removes the generation it publishes', async () => {
     const { errors } = captureLogs(ctx)
     await apply(ctx, stdioConfig({ initialDelayMs: 2, maxDelayMs: 8, maxAttempts: 1 }))

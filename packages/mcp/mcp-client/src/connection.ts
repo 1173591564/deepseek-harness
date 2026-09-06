@@ -10,7 +10,8 @@
  * the next disconnect starts a fresh budget while a crash-looping server —
  * even one whose connects briefly succeed — still exhausts the cap instead of
  * restarting forever. Exhaustion unregisters the server's tools and stops;
- * disposal (including HMR) is the only way back from that state.
+ * an explicit reconnect request can start a fresh budget when an external
+ * dependency changes, while disposal remains final.
  *
  * @module
  */
@@ -104,6 +105,13 @@ export interface ConnectionHandle {
    */
   ready: Promise<ConnectionOutcome>
   /**
+   * Start a fresh connection attempt when the supervisor is down, including
+   * after automatic retries are exhausted. An established connection is left
+   * unchanged; a request during an attempt is coalesced and runs only if that
+   * attempt fails.
+   */
+  requestReconnect(): void
+  /**
    * Stop reconnection, close the live client, wait for the in-flight attempt
    * and queued tool syncs to quiesce, then unregister every tool this server
    * still owns.
@@ -155,12 +163,15 @@ export function startConnection(
   /** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
   let disposers: ToolDisposers = new Map()
   let reconnectTimer: NodeJS.Timeout | undefined
+  /** Coalesced external reconnect request received while an attempt is in flight. */
+  let reconnectRequested = false
   /** Consecutive failed connection attempts within the current outage. */
   let failedAttempts = 0
   /** When the current generation finished connect + initial sync; undefined while down. */
   let connectedAt: number | undefined
-  /** The real error from the first connection attempt, for startup-await diagnostics. */
-  let firstAttemptError: unknown
+  /** Outcome of the activation attempt, independent of any retry it starts. */
+  let initialAttemptSucceeded = false
+  let initialAttemptError: unknown
 
   /** A generation may act only while it is the current one on a live plugin. */
   const isCurrent = (generation: Client): boolean => !disposed && client === generation
@@ -187,6 +198,14 @@ export function startConnection(
     if (!isCurrent(generation)) return
     client = undefined
     clientClosed = undefined
+    if (reconnectRequested) {
+      reconnectRequested = false
+      failedAttempts = 0
+      connectedAt = undefined
+      ctx.logger.info(`${label}: connection retry requested; reconnecting now`)
+      settling = connectGeneration(false)
+      return
+    }
     scheduleReconnect()
   }
 
@@ -290,7 +309,7 @@ export function startConnection(
       }
       await enqueueSync(generation, startup ? startupOpts : opts)
     } catch (error) {
-      if (firstAttemptError === undefined) firstAttemptError = error
+      if (startup) initialAttemptError = error
       // Disposal clears current ownership before it closes the generation, so
       // only a live supervisor reports an attempt failure.
       if (isCurrent(generation)) ctx.logger.warn(`${label}: connection attempt failed (${errorKind(error)})`)
@@ -314,6 +333,8 @@ export function startConnection(
     }
     if (!isCurrent(generation)) return
     connectedAt = Date.now()
+    reconnectRequested = false
+    if (startup) initialAttemptSucceeded = true
     if (failedAttempts > 0) ctx.logger.info(`${label}: reconnected and re-synced tools (attempt ${failedAttempts}/${policy.maxAttempts})`)
   }
 
@@ -324,21 +345,31 @@ export function startConnection(
   // success). If the first attempt fails and reconnect is enabled, the
   // supervisor is already scheduling a retry — ready just reports the outcome.
   const ready: Promise<ConnectionOutcome> = settling.then(() => {
-    // After settling: if client is set the initial connect+sync succeeded.
-    // If not, the supervisor either scheduled a retry (error logged) or gave
-    // up (error logged). Either way the outcome is reported with the real error.
-    // Note: settling.then() is a microtask; stdio onclose is a macrotask — so
-    // a server that crashes AFTER a successful initial sync cannot flip client
-    // to undefined before this continuation runs.
-    if (client !== undefined) return {}
-    /* v8 ignore next -- defensive: firstAttemptError is always set when connect/sync fails */
-    return { error: firstAttemptError ?? new Error(`${label}: initial connection failed`) }
+    if (initialAttemptSucceeded) return {}
+    /* v8 ignore next -- defensive: initialAttemptError is set when the activation attempt fails */
+    return { error: initialAttemptError ?? new Error(`${label}: initial connection failed`) }
   })
 
   return {
     ready,
+    requestReconnect(): void {
+      if (disposed || connectedAt !== undefined) return
+      if (client !== undefined) {
+        reconnectRequested = true
+        return
+      }
+      if (reconnectTimer !== undefined) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = undefined
+      }
+      failedAttempts = 0
+      connectedAt = undefined
+      ctx.logger.info(`${label}: connection retry requested; reconnecting now`)
+      settling = connectGeneration(false)
+    },
     async dispose(): Promise<void> {
       disposed = true
+      reconnectRequested = false
       if (reconnectTimer !== undefined) {
         clearTimeout(reconnectTimer)
         reconnectTimer = undefined
