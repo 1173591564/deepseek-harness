@@ -15,7 +15,16 @@ import type { Config } from '@deepseek-ai/dsh-mcp-client'
 
 // vi.mock factories are hoisted above every import/const, so the mock fns and
 // class must be created inside vi.hoisted to exist when the factories run.
-const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances } = vi.hoisted(() => {
+const {
+  mockConnect,
+  mockClose,
+  mockListTools,
+  mockCallTool,
+  mockSetNotificationHandler,
+  mockStreamableHttp,
+  MockClient,
+  instances,
+} = vi.hoisted(() => {
   const mockConnect = vi.fn<() => Promise<void>>()
   const mockClose = vi.fn<() => Promise<void>>()
   const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
@@ -23,6 +32,7 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
     _params?: Record<string, unknown>, _compatibilitySchema?: unknown, _options?: unknown,
   ) => Promise<unknown>>()
   const mockSetNotificationHandler = vi.fn()
+  const mockStreamableHttp = vi.fn()
   const mockRequest = vi.fn(async (
     request: { method: string; params?: Record<string, unknown> },
     _schema: unknown,
@@ -41,7 +51,16 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
     constructor() { instances.push(this) }
   }
   const instances: MockClient[] = []
-  return { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances }
+  return {
+    mockConnect,
+    mockClose,
+    mockListTools,
+    mockCallTool,
+    mockSetNotificationHandler,
+    mockStreamableHttp,
+    MockClient,
+    instances,
+  }
 })
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
@@ -53,7 +72,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
 }))
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn(),
+  StreamableHTTPClientTransport: mockStreamableHttp,
 }))
 
 // vi.mock is hoisted above static imports, so the modules under test see the
@@ -168,6 +187,38 @@ describe('reconnect supervisor', () => {
     instances[0]!.onclose?.()
     await sleep(30)
     expect(instances).toHaveLength(2)
+  })
+
+  it('stops after authentication rejection without consuming reconnect attempts', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }))
+    const rejected = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+    mockConnect.mockImplementationOnce(async () => {
+      const options = mockStreamableHttp.mock.calls[0]?.[1] as { fetch: (url: string) => Promise<Response> }
+      await options.fetch('https://example.test/mcp')
+      throw new Error('Unauthorized')
+    })
+    const handle = startConnection(
+      ctx,
+      {
+        transport: 'streamable-http',
+        serverName: 'srv',
+        url: 'https://example.test/mcp',
+        headers: {},
+        bearerTokenEnv: 'MCP_TOKEN',
+        toolCallTimeoutMs: 60_000,
+        failOnStartupError: false,
+      },
+      resolveReconnectPolicy({ initialDelayMs: 2, maxDelayMs: 8, maxAttempts: 2 }, 'reconnect'),
+      async () => 'token',
+      rejected,
+    )
+
+    await handle.ready
+    await sleep(20)
+    expect(rejected).toHaveBeenCalledOnce()
+    expect(mockConnect).toHaveBeenCalledOnce()
+    fetch.mockRestore()
+    await handle.dispose()
   })
 
   it('stops at the failure cap, unregisters the tools, and reports final failure', async () => {

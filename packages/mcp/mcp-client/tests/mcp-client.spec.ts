@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -509,6 +510,21 @@ describe('tool execution', () => {
     expect(JSON.stringify(result.content)).not.toContain('token-value')
   })
 
+  it('reports HTTP 401 as an authentication rejection', async () => {
+    const client = createMockClient([{ name: 'remote', inputSchema: { type: 'object' } }])
+    client.callTool.mockRejectedValue(new StreamableHTTPError(401, 'Unauthorized'))
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('authentication-rejected'), name: 'mcp__srv__remote', arguments: {},
+    })
+
+    expect(result.isError).toBe(true)
+    expect(result.error?.message)
+      .toBe('MCP tool "remote" request failed: authentication rejected (HTTP 401); replace the configured credential')
+  })
+
   it('reports request timeouts without exposing the remote cause', async () => {
     const client = createMockClient([{ name: 'slow', inputSchema: { type: 'object' } }])
     client.callTool.mockRejectedValue(
@@ -774,7 +790,7 @@ describe('createTransport', () => {
     expect(transport).toHaveProperty('close')
   })
 
-  it('creates StreamableHTTPClientTransport for http config without headers', () => {
+  it('creates StreamableHTTPClientTransport for http config without headers', async () => {
     const config: Config = {
       transport: 'streamable-http',
       serverName: 'srv',
@@ -787,6 +803,14 @@ describe('createTransport', () => {
     expect(transport).toBeDefined()
     expect(transport).toHaveProperty('start')
     expect(transport).toHaveProperty('close')
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }))
+    const guardedFetch = Reflect.get(transport, '_fetch') as (
+      url: string | URL,
+      init?: RequestInit,
+    ) => Promise<Response>
+    await expect(guardedFetch(config.url, { headers: { 'X-Test': 'yes' } })).resolves.toHaveProperty('status', 200)
+    expect(fetch).toHaveBeenCalledOnce()
+    fetch.mockRestore()
   })
 
   it('creates StreamableHTTPClientTransport for http config with headers', () => {
@@ -802,6 +826,33 @@ describe('createTransport', () => {
     expect(transport).toBeDefined()
     expect(transport).toHaveProperty('start')
     expect(transport).toHaveProperty('close')
+  })
+
+  it('reports HTTP 401 through the rejection callback but not HTTP 403', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    const onAuthenticationRejected = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+    const config: Config = {
+      transport: 'streamable-http',
+      serverName: 'srv',
+      url: 'http://127.0.0.1:3000/mcp',
+      headers: {},
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: false,
+    }
+    const transport = createTransport(config, async () => 'token', onAuthenticationRejected)
+    const guardedFetch = Reflect.get(transport, '_fetch') as (
+      url: string | URL,
+      init?: RequestInit,
+    ) => Promise<Response>
+
+    fetch.mockResolvedValueOnce(new Response(null, { status: 401 }))
+    await expect(guardedFetch(config.url)).resolves.toHaveProperty('status', 401)
+    expect(onAuthenticationRejected).toHaveBeenCalledOnce()
+
+    fetch.mockResolvedValueOnce(new Response(null, { status: 403 }))
+    await expect(guardedFetch(config.url)).resolves.toHaveProperty('status', 403)
+    expect(onAuthenticationRejected).toHaveBeenCalledOnce()
+    fetch.mockRestore()
   })
 
   it('scrubs sensitive env vars and forwards the rest', () => {

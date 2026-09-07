@@ -27,6 +27,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { apply } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
 import { publicToolName } from '@deepseek-ai/dsh-mcp-client/src/tools.ts'
 import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import type {} from '@deepseek-ai/dsh-mcp-client/src/types.ts'
 
 const testToolSignal = new AbortController().signal
 
@@ -599,6 +600,10 @@ describe('streamable-http — in-process MCP server', () => {
 
   it('rejects a wrong Bearer credential at the server', async () => {
     const isolated = await mountRegistry()
+    const rejectedEvents: Array<{ serverName: string; credentialRef: string }> = []
+    isolated.on('mcp-client/authentication-rejected', (payload) => {
+      rejectedEvents.push(payload)
+    })
     const directory = await mkdtemp(join(tmpdir(), 'dsh-mcp-wrong-credentials-'))
     const rejectedRef = credentialRef(`MCP_E2E_REJECTED_${process.pid}`)
     await isolated.plugin(LocalCredentialProvider, {
@@ -617,7 +622,8 @@ describe('streamable-http — in-process MCP server', () => {
       reconnect: { enabled: false },
     })).rejects.toThrow('initial connection or tool synchronization failed')
     expect(seenAuth.at(-1)).toBe('Bearer wrong-token')
-    await expect(isolated.credentials.resolve(rejectedRef)).resolves.toBeUndefined()
+    await expect(isolated.credentials.resolve(rejectedRef)).resolves.toMatchObject({ value: 'wrong-token' })
+    expect(rejectedEvents).toEqual([{ serverName: 'wrong', credentialRef: rejectedRef }])
     await isolated.fiber.dispose()
     await rm(directory, { recursive: true, force: true })
   })

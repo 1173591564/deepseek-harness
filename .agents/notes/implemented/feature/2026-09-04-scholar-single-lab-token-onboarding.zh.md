@@ -14,13 +14,13 @@ Status: implemented
 
 `@deepseek-ai/dsh-client-ui-scholar-onboarding` 注册一个 `settings.onboarding` 步骤。存在 `academic` preset 且可写的 `SCHOLAR_REMOTE_TOKEN` Managed Credential 缺失时，该步骤出现。Deployment composition 提供固定 `gatewayUrl`，普通用户只输入 Token。Controller 从 gateway origin 派生 `/v1/me`，使用 Bearer authentication 调用该地址，并仅在成功响应包含非空 `name` 后写入 Managed Credential。
 
-MCP HTTP transport 只在明确收到 `401` 或 `403` 后 unset provider-managed credential。网络错误、超时、redirect、`5xx` response 和 MCP Tool error 保留该 credential。若初始连接或重连预算已经停止，保存替换 credential 会启动新的连接尝试；已建立的连接在下一次请求时读取新值。除非 DSH composition 显式允许非 loopback HTTP，否则必须使用 HTTPS；Proxy Hub deployment 还需单独允许 development HTTP。启用 HTTP 时，浏览器显示明文传输警告。
+MCP HTTP transport 在明确收到 `401` 后保留 provider-managed credential、发出 typed rejection event，并停止当前 connection outage，直到配置替换值。明确的 `403` 是 authorization denial，不会使 credential 失效。网络错误、超时、redirect、`5xx` response 和 MCP Tool error 也保留该 credential。若初始连接或重连预算已经停止，保存替换 credential 会启动新的连接尝试；已建立的连接在下一次请求时读取新值。除非 DSH composition 显式允许非 loopback HTTP，否则必须使用 HTTPS；Proxy Hub deployment 还需单独允许 development HTTP。启用 HTTP 时，浏览器显示明文传输警告。
 
 Token 和 onboarding state 不进入 Session event 或 model request。
 
 ## Verification
 
-Package tests 覆盖激活条件、验证顺序、request header、identity parsing、credential write failure、双语 dialog state、固定 endpoint composition 和 slot disposal。MCP integration tests 覆盖 authentication rejection 后删除 provider-managed credential、`5xx` 后保留 credential，以及匹配且已配置的 credential 更新后重新连接。发布的 web composition 与 browser replay 覆盖 package 注册和首次使用 dialog。
+Package tests 覆盖激活条件、验证顺序、request header、identity parsing、credential write failure、双语 dialog state、固定 endpoint composition 和 slot disposal。MCP integration tests 覆盖 authentication rejection 后保留 credential 与发送 rejection event、`5xx` 后保留 credential，以及匹配且已配置的 credential 更新后重新连接。发布的 web composition 与 browser replay 覆盖 package 注册和首次使用 dialog。
 
 ## Alternatives considered
 
@@ -36,6 +36,6 @@ Package tests 覆盖激活条件、验证顺序、request header、identity pars
 
 ## Consequences
 
-研究用户首次使用时粘贴一次 Token，后续 Scholar session 复用仅 owner 可读的 Managed Credential。Rotation 或 revoke 会使下一次明确的 authentication rejection 删除 managed value，并使 onboarding 可以重新出现。保存替换 Token 后，已停止的 MCP connection 无需重启 DSH 即可恢复。管理员操作一个 Token facade，内部 tenant 与 policy record 继续用于 compatibility。
+研究用户首次使用时粘贴一次 Token，后续 Scholar session 复用仅 owner 可读的 Managed Credential。Rotation 或 revoke 会使下一次明确的 authentication rejection 保留 managed value、通知浏览器并显示替换 Token onboarding。保存替换 Token 后，已停止的 MCP connection 无需重启 DSH 即可恢复。管理员操作一个 Token facade，内部 tenant 与 policy record 继续用于 compatibility。
 
 Development HTTP 允许针对当前公网 endpoint 测试，但会明文暴露 Token 与研究流量。该 composition 只能使用可撤销的测试 Token；分发长期 Token 必须使用 HTTPS 或加密私网。

@@ -139,6 +139,19 @@ describe('ScholarOnboardingController', () => {
     expect(malformed.controller.store.getSnapshot().error).toBe('malformed')
   })
 
+  it('shows replacement guidance even while the credential remains configured', async () => {
+    const h = harness({ configured: true })
+    await h.controller.load()
+    expect(h.controller.store.getSnapshot().status).toBe('hidden')
+
+    h.controller.markRejected()
+    expect(h.controller.store.getSnapshot()).toEqual({
+      status: 'required',
+      error: 'rejected',
+      tokenName: null,
+    })
+  })
+
   it('reports failed and rejected credential writes without hiding the step', async () => {
     for (const h of [harness({ saveFailure: true }), harness({ saveReject: true })]) {
       await expect(h.controller.validateAndSave('sk-test')).resolves.toBe(false)

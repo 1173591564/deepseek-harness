@@ -2398,6 +2398,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'mcp-client/authentication-rejected',
+    mode: 'emit',
+    signature: '\'mcp-client/authentication-rejected\'(payload: { serverName: string credentialRef: CredentialRef }): void',
+    summary: 'The MCP server rejected its configured credential with HTTP 401.',
+    description: 'The MCP server rejected its configured credential with HTTP 401.',
+    parameters: [{ name: 'payload', description: 'Server and credential identity for browser consumers.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',

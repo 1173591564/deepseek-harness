@@ -53,10 +53,7 @@ export function createTransport(
           headers.set('authorization', `Bearer ${await resolveBearerToken()}`)
         }
         const response = await fetch(url, { ...init, headers, redirect: 'error' })
-        if (
-          onAuthenticationRejected !== undefined
-          && (response.status === 401 || response.status === 403)
-        ) {
+        if (onAuthenticationRejected !== undefined && response.status === 401) {
           await onAuthenticationRejected()
         }
         return response

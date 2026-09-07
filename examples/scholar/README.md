@@ -37,7 +37,7 @@ bash install.sh
 
 Run `dsh web` and select the academic preset. The onboarding step asks only for the administrator-issued Scholar Token, validates it through Proxy Hub `/v1/me`, and stores it as an owner-only Managed Credential after validation succeeds. Later sessions reuse the credential.
 
-Explicit `401` and `403` responses require a replacement Token. Network failures, timeouts, and `5xx` responses retain an existing Managed Credential.
+An explicit `401` keeps the stored Managed Credential, shows replacement-token guidance, and stops the current connection retry until a replacement is saved. An explicit `403` is an authorization denial and does not invalidate the credential. Network failures, timeouts, and `5xx` responses also retain an existing Managed Credential.
 
 An initial remote outage does not roll back the academic preset. DSH retries in the background, and storing a configured replacement Token wakes a stopped connection supervisor without restarting DSH.
 

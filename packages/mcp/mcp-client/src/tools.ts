@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { ErrorCode, ListToolsResultSchema, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
@@ -255,6 +256,12 @@ function createExecutor(
         && error.code === REQUEST_TIMEOUT_CODE
       ) {
         throw new Error(`MCP tool "${rawName}" timed out`, { cause: error })
+      }
+      if (error instanceof StreamableHTTPError && error.code === 401) {
+        throw new Error(
+          `MCP tool "${rawName}" request failed: authentication rejected (HTTP 401); replace the configured credential`,
+          { cause: error },
+        )
       }
       throw new Error(`MCP tool "${rawName}" request failed`, { cause: error })
     }

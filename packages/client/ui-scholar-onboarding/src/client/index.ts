@@ -9,6 +9,7 @@ import Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-mcp-client/types'
 import { ScholarOnboardingController, SCHOLAR_TOKEN_REF } from './controller.ts'
 import { ScholarOnboardingDialog } from './ScholarOnboardingDialog.tsx'
 import type { ScholarOnboardingInjected } from './ScholarOnboardingDialog.tsx'
@@ -82,6 +83,9 @@ export function apply(ctx: ClientContext, config: Config): void {
     const disposers = [
       ctx.remote.$on('credentials/updated', (ref) => {
         if (ref === SCHOLAR_TOKEN_REF) void controller.load()
+      }),
+      ctx.remote.$on('mcp-client/authentication-rejected', (payload) => {
+        if (payload.credentialRef === SCHOLAR_TOKEN_REF) controller.markRejected()
       }),
       ctx.on('connection/reset', () => { void controller.load() }),
     ]

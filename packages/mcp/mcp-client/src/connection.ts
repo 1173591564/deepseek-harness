@@ -274,6 +274,7 @@ export function startConnection(
     const closed: PromiseWithResolvers<void> = Promise.withResolvers()
     let attemptSettled = false
     let closeObserved = false
+    let authenticationRejected: boolean | undefined
     const hasClosed = (): boolean => closeObserved
     client = generation
     clientClosed = closed.promise
@@ -301,7 +302,10 @@ export function startConnection(
       },
     )
     try {
-      await generation.connect(createTransport(config, resolveBearerToken, onAuthenticationRejected))
+      await generation.connect(createTransport(config, resolveBearerToken, async () => {
+        authenticationRejected = true
+        await onAuthenticationRejected?.()
+      }))
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)
@@ -321,6 +325,11 @@ export function startConnection(
         client = undefined
         clientClosed = undefined
         ctx.logger.error(`${label}: failed generation did not close within ${GENERATION_CLOSE_TIMEOUT_MS}ms — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry`)
+        return
+      }
+      if (authenticationRejected) {
+        client = undefined
+        clientClosed = undefined
         return
       }
       generationDown(generation)

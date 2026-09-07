@@ -13,7 +13,7 @@ const SCHOLAR_PRESET_ID = 'academic'
 /** User-visible state of the Scholar onboarding step. */
 export interface ScholarOnboardingState {
   status: 'idle' | 'loading' | 'hidden' | 'required' | 'validating' | 'error'
-  error: 'invalid' | 'unavailable' | 'malformed' | 'saveFailed' | null
+  error: 'invalid' | 'unavailable' | 'malformed' | 'saveFailed' | 'rejected' | null
   tokenName: string | null
 }
 
@@ -46,6 +46,11 @@ export class ScholarOnboardingController {
     fetchIdentity: typeof fetch = fetch,
   ) {
     this.fetchIdentity = (input, init) => fetchIdentity(input, init)
+  }
+
+  /** Show replacement-token guidance after the configured credential is rejected. */
+  markRejected(): void {
+    this.set({ status: 'required', error: 'rejected' })
   }
 
   private set(patch: Partial<ScholarOnboardingState>): void {
