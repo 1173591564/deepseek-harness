@@ -12,7 +12,7 @@ Status: implemented
 
 `packages/mcp/mcp-client/src/connection.ts` 拥有一个逐实例的连接监督器；`apply()` 解析配置，并把 `serverName` 预留、credential update listener 与 supervisor lifecycle 绑定到 plugin fiber。监督器负责管理 client/transport generation、活跃的工具注册以及重连循环。
 
-**触发条件。** 监督器在每一代上挂载 `client.onclose`。SDK 在 stdio 子进程退出时触发该回调，因此崩溃无需轮询即可感知。`StreamableHTTPClientTransport` 自行恢复内部 SSE（Server-Sent Events）流，并按调用暴露已建立连接后的请求失败；这些失败不会重启 supervisor generation。初始 HTTP 连接失败仍进入 supervisor 的重试策略。对于带身份验证的 HTTP，`apply()` 监听配置的 Managed Credential 更新，并在更新能解析到已配置值且 supervisor 停止时请求新的尝试。
+**触发条件。** 监督器在每一代上挂载 `client.onclose`。SDK 在 stdio 子进程退出时触发该回调，因此崩溃无需轮询即可感知。`StreamableHTTPClientTransport` 自行恢复内部 SSE（Server-Sent Events）流，并按调用暴露已建立连接后的请求失败；这些失败不会重启 supervisor generation。初始 HTTP 连接失败仍进入 supervisor 的重试策略。HTTP `401` 会终止当前 connection attempt、发出 `mcp-client/authentication-rejected` 并保留已配置 credential。对于带身份验证的 HTTP，`apply()` 监听配置的 Managed Credential 更新，并在更新能解析到已配置值且 supervisor 停止时请求新的尝试。
 
 **代隔离，无交错。** 每次尝试构建一个全新的 transport 和 `Client`（SDK 将一个 Protocol 绑定到一个 transport 上终身使用）。每个监督器内部有一个队列将所有 `syncTools` 调用串行化——跨所有代的初始同步和 `list_changed` 再同步——`isCurrent` 栅栏使过时的代变为惰性，从而确保不会有两次同步交错执行 dispose 上一代/注册下一代的切换（否则会对同一代执行两次 dispose 并泄漏另一代）。该队列还消除了一个先前存在的竞态：两次快速的 `list_changed` 通知同时触发重新同步。严格启动注册由激活尝试本身显式拥有，而非由首个入队者拥有；提前到达的 `list_changed` 采用故障隔离的再同步语义，不能消费 `failOnStartupError`。失败信号按代幂等：一次连接拒绝与其自身 transport 关闭竞态时，仅调度恰好一次重试。失败尝试只有在 `Client.close()` 结算且 transport 报告 `onclose` 后才能进入退避；对 stdio 而言，`onclose` 证明子进程已退出；若关闭信号始终未到，则在 SDK 的有界终止窗口结束后停止重连，而不是允许两个服务器进程重叠运行。dispose 使用同一个有界关闭信号屏障；若关停未完成则予以报告，且绝不重启。
 
@@ -38,7 +38,7 @@ Status: implemented
 
 ## 测试
 
-单元测试（`tests/reconnect.spec.ts`，mock SDK）：恢复在不产生重复或泄漏的前提下切换 generation 并服务恢复后的调用、诊断区分初始或重试失败与已建立连接丢失、严格启动注册在连接前收到 `list_changed` 后仍然生效、初始化失败等待旧 generation 的关闭信号并在信号缺失时停止、dispose 等待同一信号并提供有界的关停未完成路径、失败上限注销工具并停止、重连请求在不重叠 generation 的前提下重启已耗尽或等待中的 supervisor、已建立连接和已 dispose 的 supervisor 忽略请求、dispose 取消退避并使进行中的同步完全停稳、dispose 后的关闭不调度操作、禁用模式关闭自动恢复、稳定窗口重置预算而崩溃循环耗尽预算、双重失败信号仅调度一次重试、过时的 generation 与 handler 为惰性，并且 `resolveReconnectPolicy` 拒绝每个无效边界值。集成覆盖验证只有匹配且已配置的 Managed Credential 更新会唤醒带身份验证的 HTTP supervisor。无需密钥的 E2E 覆盖真实 stdio 崩溃恢复、故障期间卸载、逐请求 Bearer 解析、缺失的 Managed Credential 保存后恢复、身份验证拒绝后的 credential 删除，以及服务器失败后的 credential 保留。刻意不做快照，因为重连不增加展示状态，而崩溃服务器 composition 会使回放依赖时序。
+单元测试（`tests/reconnect.spec.ts`，mock SDK）：恢复在不产生重复或泄漏的前提下切换 generation 并服务恢复后的调用、诊断区分初始或重试失败与已建立连接丢失、严格启动注册在连接前收到 `list_changed` 后仍然生效、初始化失败等待旧 generation 的关闭信号并在信号缺失时停止、dispose 等待同一信号并提供有界的关停未完成路径、失败上限注销工具并停止、重连请求在不重叠 generation 的前提下重启已耗尽或等待中的 supervisor、已建立连接和已 dispose 的 supervisor 忽略请求、dispose 取消退避并使进行中的同步完全停稳、dispose 后的关闭不调度操作、禁用模式关闭自动恢复、稳定窗口重置预算而崩溃循环耗尽预算、双重失败信号仅调度一次重试、过时的 generation 与 handler 为惰性，并且 `resolveReconnectPolicy` 拒绝每个无效边界值。集成覆盖验证只有匹配且已配置的 Managed Credential 更新会唤醒带身份验证的 HTTP supervisor。无需密钥的 E2E 覆盖真实 stdio 崩溃恢复、故障期间卸载、逐请求 Bearer 解析、缺失的 Managed Credential 保存后恢复、身份验证拒绝后的 credential 保留，以及服务器失败后的 credential 保留。刻意不做快照，因为重连不增加展示状态，而崩溃服务器 composition 会使回放依赖时序。
 
 ## 后果
 

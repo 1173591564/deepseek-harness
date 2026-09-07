@@ -13,14 +13,23 @@ import type { Config } from '@deepseek-ai/dsh-mcp-client'
 
 // vi.mock factories are hoisted above every import/const, so the mock fns and
 // class must be created inside vi.hoisted to exist when the factories run.
-const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient } = vi.hoisted(() => {
-  const mockConnect = vi.fn<() => Promise<void>>()
+const {
+  mockConnect,
+  mockClose,
+  mockListTools,
+  mockCallTool,
+  mockSetNotificationHandler,
+  mockStreamableHttp,
+  MockClient,
+} = vi.hoisted(() => {
+  const mockConnect = vi.fn<(_transport?: unknown) => Promise<void>>()
   const mockClose = vi.fn<() => Promise<void>>()
   const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
   const mockCallTool = vi.fn<(
     _params?: Record<string, unknown>, _compatibilitySchema?: unknown, _options?: unknown,
   ) => Promise<unknown>>()
   const mockSetNotificationHandler = vi.fn()
+  const mockStreamableHttp = vi.fn()
   const mockRequest = vi.fn(async (
     request: { method: string; params?: Record<string, unknown> },
     _schema: unknown,
@@ -38,7 +47,15 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
     request = mockRequest
     setNotificationHandler = mockSetNotificationHandler
   }
-  return { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient }
+  return {
+    mockConnect,
+    mockClose,
+    mockListTools,
+    mockCallTool,
+    mockSetNotificationHandler,
+    mockStreamableHttp,
+    MockClient,
+  }
 })
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
@@ -50,7 +67,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
 }))
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn(),
+  StreamableHTTPClientTransport: mockStreamableHttp,
 }))
 
 // vi.mock is hoisted above static imports, so the module under test sees the
@@ -484,6 +501,38 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(mockConnect).toHaveBeenCalled()
     expect(ctx.tools.get('mcp__web__remote')).toBeDefined()
+  })
+
+  it('retains a configured credential and emits its rejection event on HTTP 401', async () => {
+    const rejectedRef = credentialRef(`MCP_APPLY_REJECT_${process.pid}`)
+    const events: Array<{ serverName: string; credentialRef: string }> = []
+    ctx.on('mcp-client/authentication-rejected', (payload) => { events.push(payload) })
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }))
+    mockConnect.mockImplementationOnce(async () => {
+      const options = mockStreamableHttp.mock.calls[0]?.[1] as { fetch: (url: string) => Promise<Response> }
+      await options.fetch('https://example.test/mcp')
+      throw new Error('Unauthorized')
+    })
+    const previous = process.env[rejectedRef]
+    process.env[rejectedRef] = 'configured-token'
+    try {
+      await apply(ctx, {
+        transport: 'streamable-http',
+        serverName: 'web',
+        url: 'https://example.test/mcp',
+        headers: {},
+        bearerTokenEnv: rejectedRef,
+        toolCallTimeoutMs: 30_000,
+        failOnStartupError: false,
+        reconnect: { enabled: false },
+      })
+      expect(events).toEqual([{ serverName: 'web', credentialRef: rejectedRef }])
+      expect(process.env[rejectedRef]).toBe('configured-token')
+    } finally {
+      fetch.mockRestore()
+      if (previous === undefined) Reflect.deleteProperty(process.env, rejectedRef)
+      else process.env[rejectedRef] = previous
+    }
   })
 
   it('retries a stopped authenticated connection when its credential is updated', async () => {

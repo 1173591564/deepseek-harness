@@ -361,4 +361,27 @@ A pending Client activation request left the answerable state.
 ```
 
 Source: [`packages/extensions/cordis-host-runner/src/types.ts:373`](../../packages/extensions/cordis-host-runner/src/types.ts)
+
+<a id="mcp-client-events"></a>
+
+### `mcp-client/*` events
+
+<a id="mcp-clientauthentication-rejected--emit"></a>
+
+#### `mcp-client/authentication-rejected` — emit
+
+The MCP server rejected its configured credential with HTTP 401.
+
+```ts cordis-catalog
+/**
+ * The MCP server rejected its configured credential with HTTP 401.
+ * @param payload - Server and credential identity for browser consumers.
+ * @mode emit
+ */
+'mcp-client/authentication-rejected'(payload: { serverName: string credentialRef: CredentialRef }): void
+```
+
+Types: [CredentialRef](credentials.md)
+
+Source: [`packages/mcp/mcp-client/src/types.ts:12`](../../packages/mcp/mcp-client/src/types.ts)
 <!-- END GENERATED cordis-surface -->

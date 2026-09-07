@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-04-scholar-single-lab-token-onboarding.md
-2026-09-04-scholar-single-lab-token-onboarding.md: 3c5859f0f701aef0fc1cbed8a9fca1ba357dd6a3
-2026-09-04-scholar-single-lab-token-onboarding.zh.md: 1de992b48d0f42d6afb2e098a62df410eb09dbf0
+2026-09-04-scholar-single-lab-token-onboarding.md: 12a0ecbf15aaaab8f6e615d627c5fa8538635e8f
+2026-09-04-scholar-single-lab-token-onboarding.zh.md: eb88e6a8aba2c30917421db0b87b57a259feaa82

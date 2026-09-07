@@ -65,7 +65,7 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 ## 行为
 
 - 连接时：插件激活会等待 `listTools()`，并在组合开始首个轮次前通过 `ctx.tools.register()` 以公开名称注册每个工具。初始连接、发现或注册失败始终会记录日志；`failOnStartupError` 为 true 时拒绝激活，否则插件仍会激活但不注册工具，supervisor 继续执行重试策略。
-- Streamable HTTP 接受 HTTPS endpoint 与显式 HTTP loopback endpoint。non-loopback HTTP 必须设置 `allowInsecureHttp: true`，且仅用于开发。每次操作都会解析 `bearerTokenEnv`，拒绝 redirect，并在引用凭证缺失时于网络访问前失败。明确的 `401` 或 `403` 会删除 provider 管理的 credential；网络失败、超时、`5xx` response 和 MCP Tool error 保留现有 credential。引用的 Managed Credential 更新并能解析到已配置值时，仅在 supervisor 已停止时启动新的连接尝试；单独删除 credential 不会启动，正常连接会继续动态解析新值而不重启。
+- Streamable HTTP 接受 HTTPS endpoint 与显式 HTTP loopback endpoint。non-loopback HTTP 必须设置 `allowInsecureHttp: true`，且仅用于开发。每次操作都会解析 `bearerTokenEnv`，拒绝 redirect，并在引用凭证缺失时于网络访问前失败。明确的 `401` 会保留 provider 管理的 credential、发出 `mcp-client/authentication-rejected`，并停止当前中断期间的重连，直到配置替换值；`403` 是 authorization denial，不会使 credential 失效。网络失败、超时、`5xx` response 和 MCP Tool error 也保留现有 credential。引用的 Managed Credential 更新并能解析到已配置值时，仅在 supervisor 已停止时启动新的连接尝试；单独删除 credential 不会启动，正常连接会继续动态解析新值而不重启。
 - 监听 `notifications/tools/list_changed` → 重新同步；获取阶段失败时保留上一世代的注册，注册冲突则会回滚本次尝试的世代，并且不保留该服务器的任何工具。
 - 工具执行：`client.callTool({ name: rawName, arguments }, { signal })`，支持超时 + 中止；公开名称绝不会发给服务器。
 - 规范成功值是 `{ content: JsonValue[], structuredContent? }`；完整的 JSON MCP 块会保留给编程调用方。受支持且已声明的 `outputSchema` 会验证 `structuredContent`；不受支持的 schema 词汇会回退为不受约束的 `JsonValue`。

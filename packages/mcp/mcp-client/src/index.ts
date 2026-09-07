@@ -23,6 +23,7 @@ import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './c
 import type { ReconnectConfig } from './connection.ts'
 // Side-effect type import: declaration-merges `ctx.tools` onto Context.
 import type {} from '@deepseek-ai/dsh-tools'
+import type {} from './types.ts'
 
 export type { McpResult } from './tools.ts'
 export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
@@ -225,17 +226,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           `mcp-client(${config.serverName}): credential "${ref}" is not configured`,
         )
       }
-      onAuthenticationRejected = async () => {
-        const credentials = ctx.get('credentials')
-        if (credentials === undefined) return
-        try {
-          await credentials.unset(ref)
-        } catch (error) {
-          ctx.logger.warn(
-            `mcp-client(${config.serverName}): authentication was rejected but credential "${ref}" could not be removed: %o`,
-            error,
-          )
-        }
+      onAuthenticationRejected = () => {
+        ctx.logger.error(
+          `mcp-client(${config.serverName}): HTTP 401 — credential "${ref}" was rejected by the server; the stored value is retained, replace it to reconnect`,
+        )
+        ctx.emit(
+          'mcp-client/authentication-rejected',
+          { serverName: config.serverName, credentialRef: ref },
+        )
+        return Promise.resolve()
       }
     }
   }

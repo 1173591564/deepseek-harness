@@ -78,4 +78,11 @@ describe('ScholarOnboardingDialog', () => {
     })
     expect(screen.getByRole('alert').textContent).toBe(en.invalid)
   })
+
+  it('renders the rejected credential guidance', () => {
+    const h = harness()
+    h.controller.markRejected()
+    render(<ScholarOnboardingDialog {...h.props} />)
+    expect(screen.getByRole('alert').textContent).toBe(en.rejected)
+  })
 })

@@ -11,14 +11,14 @@ import { ScholarOnboardingDialog } from '../src/client/ScholarOnboardingDialog.t
 
 usePinnedBrowserLanguages('zh-CN')
 
-async function bench() {
+async function bench(connectionApi: Record<string, unknown> = {}) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
-  new TestRemote(ctx)
-  ctx.provide('connection', { api: {} } as never)
-  return { ctx, locale, slots: ctx.get('slots') as SlotRegistry }
+  const remote = new TestRemote(ctx)
+  ctx.provide('connection', { api: connectionApi } as never)
+  return { ctx, locale, remote, slots: ctx.get('slots') as SlotRegistry }
 }
 
 function declare(slots: SlotRegistry): () => void {
@@ -91,5 +91,53 @@ describe('ui-scholar-onboarding apply', () => {
     const injected = allowed.slots.entries('settings.onboarding')[0]!.inject as unknown as
       () => import('../src/client/ScholarOnboardingDialog.tsx').ScholarOnboardingInjected
     expect(injected().insecureTransport).toBe(true)
+  })
+
+  it('shows only Scholar rejection events and hides again after saving a replacement', async () => {
+    const api = {
+      agentPresets: { list: vi.fn(() => Promise.resolve({
+        rpcId: 'preset' as never,
+        result: { ok: true, value: { presets: [{ id: 'academic' }] } },
+      })) },
+      credentials: {
+        describe: vi.fn(() => Promise.resolve({
+          rpcId: 'describe' as never,
+          result: { ok: true, value: { credentials: {
+            SCHOLAR_REMOTE_TOKEN: { configured: true, writable: true },
+          } } },
+        })),
+        set: vi.fn(() => Promise.resolve({
+          rpcId: 'set' as never,
+          result: { ok: true, value: {} },
+        })),
+      },
+    }
+    const hWithApi = await bench(api)
+    declare(hWithApi.slots)
+    const fiber = hWithApi.ctx.plugin({ inject: [...inject], apply }, HTTPS_CONFIG)
+    await fiber.await()
+    const entry = hWithApi.slots.entries('settings.onboarding')[0]!
+    const injected = entry.inject as unknown as
+      () => import('../src/client/ScholarOnboardingDialog.tsx').ScholarOnboardingInjected
+    const controller = injected().controller
+
+    hWithApi.remote.$dispatch('mcp-client/authentication-rejected', [{
+      serverName: 'scholar',
+      credentialRef: 'OTHER_TOKEN',
+    }])
+    expect(controller.store.getSnapshot().status).toBe('idle')
+
+    hWithApi.remote.$dispatch('mcp-client/authentication-rejected', [{
+      serverName: 'scholar',
+      credentialRef: 'SCHOLAR_REMOTE_TOKEN',
+    }])
+    expect(controller.store.getSnapshot()).toMatchObject({
+      status: 'required',
+      error: 'rejected',
+    })
+
+    hWithApi.remote.$dispatch('credentials/updated', ['SCHOLAR_REMOTE_TOKEN'])
+    await vi.waitFor(() => { expect(controller.store.getSnapshot().status).toBe('hidden') })
+    await fiber.dispose()
   })
 })

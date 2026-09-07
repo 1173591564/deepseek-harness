@@ -14,13 +14,13 @@ The single-lab Proxy Hub presents Token management, Service status, and Audit lo
 
 `@deepseek-ai/dsh-client-ui-scholar-onboarding` registers one `settings.onboarding` step. The step appears when the `academic` preset exists and the writable `SCHOLAR_REMOTE_TOKEN` Managed Credential is absent. The deployment composition supplies a fixed `gatewayUrl`; ordinary users enter only the Token. The controller derives `/v1/me` from the gateway origin, calls it with Bearer authentication, and writes the Managed Credential only after a successful response containing a nonempty `name`.
 
-The MCP HTTP transport unsets the provider-managed credential only after an explicit `401` or `403`. Network errors, timeouts, redirects, `5xx` responses, and MCP Tool errors retain it. If the initial connection or reconnect budget has stopped, saving a replacement credential starts a fresh connection attempt; an established connection reads the replacement on its next request. HTTPS is required unless the DSH composition explicitly enables non-loopback HTTP, and the Proxy Hub deployment separately enables development HTTP. The browser displays a plaintext warning while HTTP is active.
+The MCP HTTP transport retains the provider-managed credential after an explicit `401`, emits a typed rejection event, and stops the current connection outage until a replacement is configured. An explicit `403` is an authorization denial and does not invalidate the credential. Network errors, timeouts, redirects, `5xx` responses, and MCP Tool errors retain it. If the initial connection or reconnect budget has stopped, saving a replacement credential starts a fresh connection attempt; an established connection reads the replacement on its next request. HTTPS is required unless the DSH composition explicitly enables non-loopback HTTP, and the Proxy Hub deployment separately enables development HTTP. The browser displays a plaintext warning while HTTP is active.
 
 The Token and onboarding state do not enter Session events or model requests.
 
 ## Verification
 
-Package tests cover activation, validation ordering, request headers, identity parsing, credential write failures, bilingual dialog states, fixed-endpoint composition, and slot disposal. MCP integration tests cover provider-managed credential removal after authentication rejection, retention after `5xx`, and reconnection after a matching configured credential update. The shipped web composition and browser replay cover the registered package and first-use dialog.
+Package tests cover activation, validation ordering, request headers, identity parsing, credential write failures, bilingual dialog states, fixed-endpoint composition, and slot disposal. MCP integration tests cover retained credentials and rejection-event delivery after authentication rejection, retention after `5xx`, and reconnection after a matching configured credential update. The shipped web composition and browser replay cover the registered package and first-use dialog.
 
 ## Alternatives considered
 
@@ -36,6 +36,6 @@ Package tests cover activation, validation ordering, request headers, identity p
 
 ## Consequences
 
-Research users paste one Token on first use and later Scholar sessions reuse the owner-readable Managed Credential. Rotation or revoke causes the next explicit authentication rejection to remove the managed value and makes onboarding eligible to reappear. Saving the replacement restores a stopped MCP connection without restarting DSH. Administrators operate one Token facade while internal tenant and policy records remain available for compatibility.
+Research users paste one Token on first use and later Scholar sessions reuse the owner-readable Managed Credential. Rotation or revoke causes the next explicit authentication rejection to preserve the managed value, notify the browser, and make replacement-token onboarding visible. Saving the replacement restores a stopped MCP connection without restarting DSH. Administrators operate one Token facade while internal tenant and policy records remain available for compatibility.
 
 Development HTTP allows testing against the current public endpoint but exposes Token and research traffic in plaintext. Only revocable test Tokens are suitable for that composition; long-lived Token distribution requires HTTPS or an encrypted private network.

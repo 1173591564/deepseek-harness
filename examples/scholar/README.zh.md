@@ -37,7 +37,7 @@ bash install.sh
 
 运行 `dsh web` 并选择 academic preset。Onboarding step 只要求管理员签发的 Scholar Token，通过 Proxy Hub `/v1/me` 验证成功后才写入 owner-only Managed Credential；后续 session 自动复用该 credential。
 
-明确的 `401` 与 `403` 要求替换 Token。Network failure、timeout 和 `5xx` response 会保留已有 Managed Credential。
+明确的 `401` 会保留已保存的 Managed Credential，显示替换 Token 提示，并停止当前连接重试，直到保存替换值；明确的 `403` 是 authorization denial，不会使 credential 失效。Network failure、timeout 和 `5xx` response 也会保留已有 Managed Credential。
 
 远程初始停机不会回滚 academic preset。DSH 会在后台重试；保存已配置的替换 Token 会唤醒已停止的 connection supervisor，无需重启 DSH。
 
